@@ -1,6 +1,7 @@
 # Textual Echo Cancellation (TEC)
 
 [![Python application](https://github.com/wq2012/tec/actions/workflows/pythonapp.yml/badge.svg)](https://github.com/wq2012/tec/actions/workflows/pythonapp.yml)
+[![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Models-blue)](https://huggingface.co/wq2012/tec_single_interfering)
 [![PyPI Version](https://img.shields.io/pypi/v/textual-echo-cancellation.svg)](https://pypi.org/project/textual-echo-cancellation/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/textual-echo-cancellation.svg)](https://pypi.org/project/textual-echo-cancellation/)
 [![Downloads](https://static.pepy.tech/badge/textual-echo-cancellation)](https://www.pepy.tech/projects/textual-echo-cancellation)
@@ -223,7 +224,36 @@ at 0 dB SNR with reverberant LJ Speech (single interfering voice) and VCTK
   <img src="resources/results.png" alt="Table 3: Published Paper Reference Results" width="720" />
 </p>
 
-### Open-Source Reproduction Results
+### Open-Source Reproduction Results & Pretrained Models on Hugging Face
+
+We provide pretrained checkpoints (`best.ckpt.*`) and quantized TensorFlow Lite
+models (`model.tflite`) on Hugging Face for both conditions and all neural
+architectures (**TEC**, **AEC-Seq2seq**, and **Vanilla-Seq2seq**):
+
+- **Single Interfering Voice (`LibriTTS + LJSpeech`)**:
+  - **TEC (proposed)**: [`wq2012/tec_single_interfering`](https://huggingface.co/wq2012/tec_single_interfering)
+  - **AEC-Seq2seq**: [`wq2012/aec_single_interfering`](https://huggingface.co/wq2012/aec_single_interfering)
+  - **Vanilla-Seq2seq**: [`wq2012/vanilla_seq2seq_single_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_single_interfering)
+- **Multiple Interfering Voices (`LibriTTS + VCTK`)**:
+  - **TEC (proposed)**: [`wq2012/tec_multi_interfering`](https://huggingface.co/wq2012/tec_multi_interfering)
+  - **AEC-Seq2seq**: [`wq2012/aec_multi_interfering`](https://huggingface.co/wq2012/aec_multi_interfering)
+  - **Vanilla-Seq2seq**: [`wq2012/vanilla_seq2seq_multi_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_multi_interfering)
+
+```python
+import os
+from huggingface_hub import snapshot_download
+from tec import inference
+
+# Download pretrained TecSingleInterfering model from Hugging Face
+model_dir = snapshot_download(repo_id="wq2012/tec_single_interfering")
+result = inference.run_inference_on_wav(
+    model_name="TecSingleInterfering",
+    mixed_wav_path="/path/to/mixed_input.wav",
+    interfering_text="currently in mountain view it is 72 degrees",
+    checkpoint_path=os.path.join(model_dir, "best.ckpt"),
+    output_wav_path="/tmp/enhanced_clean.wav",
+)
+```
 
 Using the standalone data preparation (`scripts/prepare_data.py`), training
 (`scripts/train.py`), and evaluation (`scripts/evaluate.py`) pipelines in this
@@ -235,20 +265,20 @@ trained for 60 steps on CPU with `batch_size=4, learning_rate=1e-3`, and
 evaluated with local `Qwen3-ASR-0.6B-F16` via `audio.cpp` on 20 utterances per
 test split):
 
-| Condition | Method | WER (%) test-clean ↓ | WER (%) test-other ↓ | MCD (dB) test-clean ↓ | MCD (dB) test-other ↓ | Side Input test-clean (KB) ↓ | Side Input test-other (KB) ↓ |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Ground-truth LibriTTS** | `GroundTruth` | 3.52 (7/199) | 6.78 (12/177) | 0.00 | 0.00 | 0.000 | 0.000 |
-| **Single interfering voice** *(LibriTTS + LJSpeech)* | `MicrophoneSignal` | 90.45 (180/199) | 114.12 (202/177) | 12.86 | 14.61 | 0.000 | 0.000 |
-| | `NlmsAec` (AEC-NLMS) | 88.44 (176/199) | 107.34 (190/177) | 12.80 | 14.48 | 243.465 | 209.085 |
-| | `NoSideInputSingleInterfering` (Vanilla-Seq2seq) | 45.23 (90/199) | 91.53 (162/177) | 9.58 | 11.34 | 0.000 | 0.000 |
-| | `AecSingleInterfering` (AEC-Seq2seq) | 12.06 (24/199) | 23.16 (41/177) | 8.85 | 9.86 | 243.465 | 209.085 |
-| | **`TecSingleInterfering` (TEC)** | **21.61 (43/199)** | **46.89 (83/177)** | **8.24** | **9.28** | **0.076** | **0.068** |
-| **Ground-truth LibriTTS (Multi split)** | `GroundTruth` | 5.03 (10/199) | 7.82 (19/243) | 0.00 | 0.00 | 0.000 | 0.000 |
-| **Multiple interfering voices** *(LibriTTS + VCTK)* | `MicrophoneSignal` | 34.17 (68/199) | 48.97 (119/243) | 7.67 | 7.70 | 0.000 | 0.000 |
-| | `NlmsAec` (AEC-NLMS) | 28.64 (57/199) | 34.98 (85/243) | 7.92 | 8.40 | 186.922 | 206.759 |
-| | `NoSideInputMultiInterfering` (Vanilla-Seq2seq) | 31.16 (62/199) | 42.39 (103/243) | 7.93 | 8.72 | 0.000 | 0.000 |
-| | `AecMultiInterfering` (AEC-Seq2seq) | 8.54 (17/199) | 22.22 (54/243) | 7.80 | 7.88 | 186.922 | 206.759 |
-| | **`TecMultiInterfering` (TEC)** | **26.63 (53/199)** | **45.27 (110/243)** | **7.96** | **8.40** | **0.037** | **0.039** |
+| Condition | Method | Hugging Face Model | WER (%) test-clean ↓ | WER (%) test-other ↓ | MCD (dB) test-clean ↓ | MCD (dB) test-other ↓ | Side Input test-clean (KB) ↓ | Side Input test-other (KB) ↓ |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Ground-truth LibriTTS** | `GroundTruth` | — | 3.52 (7/199) | 6.78 (12/177) | 0.00 | 0.00 | 0.000 | 0.000 |
+| **Single interfering voice** *(LibriTTS + LJSpeech)* | `MicrophoneSignal` | — | 90.45 (180/199) | 114.12 (202/177) | 12.86 | 14.61 | 0.000 | 0.000 |
+| | `NlmsAec` (AEC-NLMS) | — | 88.44 (176/199) | 107.34 (190/177) | 12.80 | 14.48 | 243.465 | 209.085 |
+| | `NoSideInputSingleInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_single_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_single_interfering) | 45.23 (90/199) | 91.53 (162/177) | 9.58 | 11.34 | 0.000 | 0.000 |
+| | `AecSingleInterfering` (AEC-Seq2seq) | [`wq2012/aec_single_interfering`](https://huggingface.co/wq2012/aec_single_interfering) | 12.06 (24/199) | 23.16 (41/177) | 8.85 | 9.86 | 243.465 | 209.085 |
+| | **`TecSingleInterfering` (TEC)** | **[`wq2012/tec_single_interfering`](https://huggingface.co/wq2012/tec_single_interfering)** | **21.61 (43/199)** | **46.89 (83/177)** | **8.24** | **9.28** | **0.076** | **0.068** |
+| **Ground-truth LibriTTS (Multi split)** | `GroundTruth` | — | 5.03 (10/199) | 7.82 (19/243) | 0.00 | 0.00 | 0.000 | 0.000 |
+| **Multiple interfering voices** *(LibriTTS + VCTK)* | `MicrophoneSignal` | — | 34.17 (68/199) | 48.97 (119/243) | 7.67 | 7.70 | 0.000 | 0.000 |
+| | `NlmsAec` (AEC-NLMS) | — | 28.64 (57/199) | 34.98 (85/243) | 7.92 | 8.40 | 186.922 | 206.759 |
+| | `NoSideInputMultiInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_multi_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_multi_interfering) | 31.16 (62/199) | 42.39 (103/243) | 7.93 | 8.72 | 0.000 | 0.000 |
+| | `AecMultiInterfering` (AEC-Seq2seq) | [`wq2012/aec_multi_interfering`](https://huggingface.co/wq2012/aec_multi_interfering) | 8.54 (17/199) | 22.22 (54/243) | 7.80 | 7.88 | 186.922 | 206.759 |
+| | **`TecMultiInterfering` (TEC)** | **[`wq2012/tec_multi_interfering`](https://huggingface.co/wq2012/tec_multi_interfering)** | **26.63 (53/199)** | **45.27 (110/243)** | **7.96** | **8.40** | **0.037** | **0.039** |
 
 ---
 
