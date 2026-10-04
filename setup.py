@@ -10,7 +10,7 @@ with open("requirements.txt", "r", encoding="utf-8") as rq:
 
 setuptools.setup(
     name="textual-echo-cancellation",
-    version="0.1.0",
+    version="0.1.2",
     author="Quan Wang",
     author_email="quanw@google.com",
     description="Textual Echo Cancellation (TEC) with Multi-Source Attention",

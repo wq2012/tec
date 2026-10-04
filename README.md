@@ -1,6 +1,7 @@
 # Textual Echo Cancellation (TEC)
 
 [![Python application](https://github.com/wq2012/tec/actions/workflows/pythonapp.yml/badge.svg)](https://github.com/wq2012/tec/actions/workflows/pythonapp.yml)
+[![HuggingFace Space](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Space%20Demo-orange)](https://huggingface.co/spaces/wq2012/tec)
 [![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Models-blue)](https://huggingface.co/wq2012/tec_single_interfering)
 [![PyPI Version](https://img.shields.io/pypi/v/textual-echo-cancellation.svg)](https://pypi.org/project/textual-echo-cancellation/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/textual-echo-cancellation.svg)](https://pypi.org/project/textual-echo-cancellation/)
@@ -13,7 +14,7 @@ This repository provides a standalone, open-source Python reproduction of
 
 > **Textual Echo Cancellation**
 > *Shaojin Ding, Ye Jia, Ke Hu, Quan Wang*
-> Paper: [https://arxiv.org/pdf/2008.06006](https://arxiv.org/pdf/2008.06006) | Audio Demo Page: [https://google.github.io/speaker-id/publications/TEC/](https://google.github.io/speaker-id/publications/TEC/)
+> Paper: [https://arxiv.org/pdf/2008.06006](https://arxiv.org/pdf/2008.06006) | Interactive Demo: [Hugging Face Space (`wq2012/tec`)](https://huggingface.co/spaces/wq2012/tec) | Audio Samples: [https://google.github.io/speaker-id/publications/TEC/](https://google.github.io/speaker-id/publications/TEC/)
 
 > [!NOTE]
 > **Open-Source Reproduction Notice**: This library is an independent
@@ -224,9 +225,11 @@ at 0 dB SNR with reverberant LJ Speech (single interfering voice) and VCTK
   <img src="resources/results.png" alt="Table 3: Published Paper Reference Results" width="720" />
 </p>
 
-### Open-Source Reproduction Results & Pretrained Models on Hugging Face
+### Interactive Demo & Pretrained Models on Hugging Face
 
-We provide pretrained checkpoints (`best.ckpt.*`) and quantized TensorFlow Lite
+- **Interactive Demo (Hugging Face Space)**: **[`https://huggingface.co/spaces/wq2012/tec`](https://huggingface.co/spaces/wq2012/tec)** — Upload any microphone mixture audio file and enter the interfering TTS text to run Textual Echo Cancellation and compare Automatic Speech Recognition (ASR) results before and after TEC.
+
+We also provide pretrained checkpoints (`best.ckpt.*`) and quantized TensorFlow Lite
 models (`model.tflite`) on Hugging Face for both conditions and all neural
 architectures (**TEC**, **AEC-Seq2seq**, and **Vanilla-Seq2seq**):
 

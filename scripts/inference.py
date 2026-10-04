@@ -59,8 +59,8 @@ def main():
   parser.add_argument(
       '--decode_max_output_frames',
       type=int,
-      default=200,
-      help='Maximum number of spectrogram frames to decode.')
+      default=0,
+      help='Maximum number of spectrogram frames to decode (0 = full length).')
   args = parser.parse_args()
 
   mixed_wav, sr = data_prep.read_wav_file(args.mixed_wav)
@@ -80,7 +80,7 @@ def main():
   runner = inference.TecInferenceRunner(
       model_config_cls=_MODEL_MAP[args.model],
       checkpoint_path=args.checkpoint_path or None,
-      decode_max_output_frames=args.decode_max_output_frames)
+      decode_max_output_frames=args.decode_max_output_frames or None)
   try:
     outputs = runner.predict(
         mixed_waveforms=[mixed_wav],
