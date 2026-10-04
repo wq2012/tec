@@ -36,7 +36,9 @@ sequence-to-sequence neural network, canceling the interfering TTS echo and
 reconstructing the clean user speech spectrogram and waveform.
 
 <p align="center">
-  <img src="resources/TEC_diagram.png" alt="TEC Model Architecture" width="480" />
+  <img src="resources/TEC_use_case.png" alt="Fig. 1: Acoustic echoes caused by TTS playback overlapping with user query" width="340" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="resources/TEC_diagram.png" alt="Fig. 2: Diagram of the Textual Echo Cancellation framework" width="520" />
 </p>
 
 ---
@@ -57,6 +59,10 @@ reconstructing the clean user speech spectrogram and waveform.
 - **Standalone Lingvo Implementation**: Built on open-source
   [`lingvo`](https://github.com/tensorflow/lingvo) and `tensorflow`, with zero
   dependencies on proprietary internal libraries.
+
+<p align="center">
+  <img src="resources/Decoder.png" alt="Fig. 3: Diagram of the decoder with multi-source attention" width="360" />
+</p>
 - **End-to-End Pipelines & CLI Scripts**:
   - **Dataset Preparation** (`scripts/prepare_data.py`): Pairs clean speech
     (LibriTTS) with longer interfering TTS utterances (LJSpeech / VCTK),
