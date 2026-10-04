@@ -81,7 +81,7 @@ def configure_multi_source_decoder(
   p = tec_decoder.MultiSourceFbeDecoderV1.Params()
   p.feature_dims = feature_dims
   p.source_dim = source_dim
-  p.reduction_factor = 1
+  p.reduction_factor = 4
   p.target_eos_offset_frames = 1
   p.eos_loss_weight = 1.0
   p.l1_loss_weight = 1.0
@@ -95,7 +95,7 @@ def configure_multi_source_decoder(
       params_init=py_utils.WeightInit.Uniform(0.1))
   p.step.target_pre_net.hidden_layer_dims = [256, 256]
   p.step.target_pre_net.dropout.keep_prob = 0.5
-  p.step.target_pre_net.dropout.dropout_at_eval = True
+  p.step.target_pre_net.dropout.dropout_at_eval = False
   p.step.eos_prob_threshold = 0.5
   if use_gmm_attention:
     p.step.attention = attention.GmmMonotonicAttention.Params().Set(
@@ -145,7 +145,7 @@ class TecBaseConfig(base_model_params.SingleTaskModelParams):
         num_mel_bins=self.NUM_MEL_BINS,
         lstm_cell_size=256,
         num_lstm_layers=3,
-        num_conv_lstm_layers=1)
+        num_conv_lstm_layers=0)
     p.encoder = configure_text_encoder(
         vocab_size=self.VOCAB_SIZE,
         embedding_dim=512,

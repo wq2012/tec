@@ -1,5 +1,6 @@
 """Input generator for Textual Echo Cancellation training and evaluation."""
 
+import glob
 from lingvo import compat as tf
 from lingvo.core import base_input_generator
 from lingvo.core import py_utils
@@ -76,10 +77,15 @@ class TecInputGenerator(base_input_generator.BaseInputGenerator):
 
   def _build_tfrecord_pipeline(self):
     p = self.params
-    files = tf.data.Dataset.list_files(p.file_pattern, shuffle=p.shuffle)
+    matched_files = sorted(glob.glob(p.file_pattern))
+    if not matched_files:
+      raise ValueError(f'No files matched file_pattern: {p.file_pattern}')
+    files = tf.data.Dataset.from_tensor_slices(matched_files)
+    if p.shuffle and len(matched_files) > 1:
+      files = files.shuffle(buffer_size=len(matched_files))
     ds = files.interleave(
         tf.data.TFRecordDataset,
-        cycle_length=4,
+        cycle_length=min(4, len(matched_files)),
         num_parallel_calls=tf.data.experimental.AUTOTUNE)
     if p.shuffle:
       ds = ds.shuffle(buffer_size=p.shuffle_buffer_size)

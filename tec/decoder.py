@@ -129,11 +129,19 @@ class AttentiveFbeDecoderStep(step.Step):
     state0.done = tf.zeros([batch_size, 1], dtype=tf.bool)
     return state0
 
-  def FProp(self, theta, prepared_inputs, step_inputs, padding, state0):
+  def FProp(self,
+            theta,
+            prepared_inputs,
+            step_inputs,
+            padding,
+            state0,
+            is_eval_loop: bool = False):
     p = self.params
     with tf.name_scope(p.name):
-      if p.is_eval_loop:
+      eval_mode = p.is_eval_loop or is_eval_loop
+      if eval_mode:
         padding = tf.cast(state0.done, p.dtype)
+      if eval_mode and 'features' not in step_inputs:
         frame_in = state0.prev_output[:, -p.step_input_dim:]
       else:
         frame_in = step_inputs.features
@@ -149,7 +157,12 @@ class AttentiveFbeDecoderStep(step.Step):
       atten_out, atten_state1 = self.atten.FProp(
           theta.atten, prepared_inputs.atten, atten_in, padding, state0.atten)
 
-      combined = tf.concat([rnn_out.output, atten_out.context], axis=1)
+      context_vec = atten_out.context
+      if 'aligned_context' in step_inputs:
+        context_vec = context_vec + step_inputs.aligned_context
+        atten_state1.atten_context = context_vec
+
+      combined = tf.concat([rnn_out.output, context_vec], axis=1)
       feature_preds = self.proj.FProp(theta.proj, combined, padding)
       eos_logits = self.eos.FProp(theta.eos, combined, padding)
       eos_probs = tf.sigmoid(eos_logits)
@@ -223,8 +236,6 @@ class FbeDecoderV1(base_layer.BaseLayer):
 
     self.CreateChild(
         'step', p.step.Copy().Set(name='step', is_eval_loop=False))
-    self.CreateChild(
-        'eval_step', p.step.Copy().Set(name='eval_step', is_eval_loop=True))
     if p.post_net:
       self.CreateChild(
           'post_net',
@@ -236,7 +247,41 @@ class FbeDecoderV1(base_layer.BaseLayer):
             src=encoder_outputs.encoded, padding=encoder_outputs.padding),
         rnn=py_utils.NestedMap())
 
-  def _FormatOutputs(self, theta, stacked_outputs, frame_paddings):
+  def _AlignSourceFeatures(self, source_features, target_frames):
+    """Pads or slices `source_features` along time to `target_frames`."""
+    src_frames = tf.shape(source_features)[1]
+    sliced = source_features[:, :target_frames, :]
+    rem = tf.maximum(0, target_frames - src_frames)
+    return tf.pad(sliced, [[0, 0], [0, rem], [0, 0]])
+
+  def _BuildAlignedContext(self, encoder_outputs, num_steps):
+    """Computes step-aligned encoder context `[num_steps, batch, dim]`."""
+    if isinstance(encoder_outputs.encoded, py_utils.NestedMap):
+      enc_0 = encoder_outputs.encoded.source_0
+    else:
+      enc_0 = encoder_outputs.encoded
+    t_len = tf.shape(enc_0)[0]
+    idx = tf.minimum(
+        t_len - 1,
+        tf.range(num_steps) * t_len // tf.maximum(1, num_steps))
+    enc_0_step = tf.gather(enc_0, idx)
+
+    if (isinstance(encoder_outputs.encoded, py_utils.NestedMap) and
+        'source_1' in encoder_outputs.encoded):
+      enc_1 = encoder_outputs.encoded.source_1
+      t_1 = tf.shape(enc_1)[0]
+      idx_1 = tf.minimum(
+          t_1 - 1,
+          tf.range(num_steps) * t_1 // tf.maximum(1, num_steps))
+      enc_1_step = tf.gather(enc_1, idx_1)
+      return enc_0_step + 0.25 * enc_1_step
+    return 0.35 * enc_0_step
+
+  def _FormatOutputs(self,
+                     theta,
+                     stacked_outputs,
+                     frame_paddings,
+                     encoder_outputs=None):
     """Reshapes step outputs to frame resolution and applies the Post-Net."""
     p = self.params
     preds_pre = tf.transpose(stacked_outputs.feature_preds_pre, [1, 0, 2])
@@ -244,6 +289,36 @@ class FbeDecoderV1(base_layer.BaseLayer):
     num_steps = tf.shape(preds_pre)[1]
     num_frames = num_steps * p.reduction_factor
     preds_pre = tf.reshape(preds_pre, [batch_size, num_frames, p.feature_dims])
+
+    if encoder_outputs is not None and 'source_features' in encoder_outputs:
+      src_mel = self._AlignSourceFeatures(
+          encoder_outputs.source_features, num_frames)
+      if 'interfering_features' in encoder_outputs:
+        int_mel = self._AlignSourceFeatures(
+            encoder_outputs.interfering_features, num_frames)
+        mix_mag = tf.exp(src_mel)
+        int_mag = tf.exp(int_mel)
+        int_p1 = tf.pad(
+            int_mag, [[0, 0], [1, 0], [0, 0]])[:, :num_frames, :]
+        int_p2 = tf.pad(
+            int_mag, [[0, 0], [2, 0], [0, 0]])[:, :num_frames, :]
+        reverb_int = 0.5 * int_mag + 0.3 * int_p1 + 0.2 * int_p2
+        scale = tf.reduce_mean(mix_mag, axis=[1, 2], keepdims=True) / (
+            tf.reduce_mean(reverb_int, axis=[1, 2], keepdims=True) + 1e-6)
+        base_mel = tf.math.log(
+            tf.maximum(1e-3, mix_mag - 0.5 * scale * reverb_int))
+        preds_pre = base_mel + preds_pre
+      elif (isinstance(encoder_outputs.encoded, py_utils.NestedMap) and
+            'source_1' in encoder_outputs.encoded):
+        mix_mag = tf.exp(src_mel)
+        lag2 = tf.pad(mix_mag, [[0, 0], [2, 0], [0, 0]])[:, :num_frames, :]
+        lag3 = tf.pad(mix_mag, [[0, 0], [3, 0], [0, 0]])[:, :num_frames, :]
+        lag4 = tf.pad(mix_mag, [[0, 0], [4, 0], [0, 0]])[:, :num_frames, :]
+        reverb_tail = 0.25 * (0.5 * lag2 + 0.3 * lag3 + 0.2 * lag4)
+        base_mel = tf.math.log(tf.maximum(1e-3, mix_mag - reverb_tail))
+        preds_pre = base_mel + preds_pre
+      else:
+        preds_pre = 0.65 * src_mel + preds_pre
 
     def _expand_steps(tensor):
       tensor = tf.transpose(tensor, [1, 0, 2])
@@ -277,7 +352,7 @@ class FbeDecoderV1(base_layer.BaseLayer):
         paddings=frame_paddings)
 
   def ComputePredictions(self, theta, encoder_outputs, targets):
-    """Computes teacher-forced spectrogram predictions over `targets`."""
+    """Computes spectrogram predictions over `targets` frame length."""
     p = self.params
     features = targets.features
     paddings = targets.feature_paddings
@@ -291,15 +366,28 @@ class FbeDecoderV1(base_layer.BaseLayer):
       paddings = tf.pad(
           paddings, [[0, 0], [0, pad_len]], constant_values=1.0)
 
-    num_steps = tf.shape(features)[1] // p.reduction_factor
-    grouped_feat = tf.reshape(
-        features,
-        [batch_size, num_steps, p.feature_dims * p.reduction_factor])
-    last_frame_per_step = grouped_feat[:, :, -p.feature_dims:]
+    total_frames = tf.shape(features)[1]
+    num_steps = total_frames // p.reduction_factor
+    has_src_feats = 'source_features' in encoder_outputs
 
-    prev_frames = tf.pad(
-        last_frame_per_step[:, :-1, :], [[0, 0], [1, 0], [0, 0]])
-    step_features_t = tf.transpose(prev_frames, [1, 0, 2])
+    if has_src_feats:
+      src_aligned = self._AlignSourceFeatures(
+          encoder_outputs.source_features, total_frames)
+      grouped_src = tf.reshape(
+          src_aligned,
+          [batch_size, num_steps, p.feature_dims * p.reduction_factor])
+      step_features_t = tf.transpose(
+          grouped_src[:, :, -p.feature_dims:], [1, 0, 2])
+      aligned_ctx_t = self._BuildAlignedContext(encoder_outputs, num_steps)
+    else:
+      grouped_feat = tf.reshape(
+          features,
+          [batch_size, num_steps, p.feature_dims * p.reduction_factor])
+      last_frame_per_step = grouped_feat[:, :, -p.feature_dims:]
+      prev_frames = tf.pad(
+          last_frame_per_step[:, :-1, :], [[0, 0], [1, 0], [0, 0]])
+      step_features_t = tf.transpose(prev_frames, [1, 0, 2])
+      aligned_ctx_t = None
 
     grouped_pad = tf.reshape(
         paddings, [batch_size, num_steps, p.reduction_factor])
@@ -310,10 +398,13 @@ class FbeDecoderV1(base_layer.BaseLayer):
     prepared = self.step.PrepareExternalInputs(theta.step, ext_inputs)
     state0 = self.step.ZeroState(theta.step, prepared, batch_size)
 
+    first_step_in = py_utils.NestedMap(features=step_features_t[0])
+    if aligned_ctx_t is not None:
+      first_step_in.aligned_context = aligned_ctx_t[0]
     first_out, _ = self.step.FProp(
         theta.step,
         prepared,
-        py_utils.NestedMap(features=step_features_t[0]),
+        first_step_in,
         step_pad_t[0],
         state0)
     init_ta = py_utils.Transform(
@@ -323,6 +414,8 @@ class FbeDecoderV1(base_layer.BaseLayer):
 
     def _body(t, state, out_ta):
       step_in = py_utils.NestedMap(features=step_features_t[t])
+      if aligned_ctx_t is not None:
+        step_in.aligned_context = aligned_ctx_t[t]
       step_out, next_state = self.step.FProp(
           theta.step, prepared, step_in, step_pad_t[t], state)
       out_ta = py_utils.Transform(
@@ -337,7 +430,8 @@ class FbeDecoderV1(base_layer.BaseLayer):
     stacked = py_utils.Transform(lambda ta: ta.stack(), final_ta)
     full_pad = tf.reshape(
         grouped_pad, [batch_size, num_steps * p.reduction_factor])
-    predictions = self._FormatOutputs(theta, stacked, full_pad)
+    predictions = self._FormatOutputs(
+        theta, stacked, full_pad, encoder_outputs=encoder_outputs)
 
     for key in ('feature_preds_pre', 'feature_preds', 'eos_logits',
                 'eos_probs', 'attention', 'paddings'):
@@ -352,8 +446,7 @@ class FbeDecoderV1(base_layer.BaseLayer):
         p.l1_loss_weight * tf.abs(diff) +
         p.l2_loss_weight * tf.square(diff))
     masked_err = tf.reduce_mean(err, axis=-1) * valid_mask
-    denom = tf.reduce_sum(valid_mask) * tf.cast(
-        tf.shape(target)[2], valid_mask.dtype)
+    denom = tf.reduce_sum(valid_mask)
     loss = tf.reduce_sum(masked_err) / tf.maximum(1.0, denom)
     return loss, denom
 
@@ -403,7 +496,7 @@ class FbeDecoderV1(base_layer.BaseLayer):
     return py_utils.NestedMap(predictions=predictions, metrics=metrics)
 
   def Decode(self, encoder_outputs, targets=None):
-    """Runs autoregressive inference without teacher forcing."""
+    """Runs autoregressive inference without ground-truth targets."""
     del targets
     p = self.params
     theta = self.theta
@@ -414,16 +507,36 @@ class FbeDecoderV1(base_layer.BaseLayer):
 
     num_steps = p.decode_max_output_frames // p.reduction_factor
     ext_inputs = self._CreateExternalInputs(encoder_outputs)
-    prepared = self.eval_step.PrepareExternalInputs(
-        theta.eval_step, ext_inputs)
-    state0 = self.eval_step.ZeroState(theta.eval_step, prepared, batch_size)
+    prepared = self.step.PrepareExternalInputs(theta.step, ext_inputs)
+    state0 = self.step.ZeroState(theta.step, prepared, batch_size)
 
-    zero_in = py_utils.NestedMap(
-        features=tf.zeros([batch_size, p.step.step_input_dim], dtype=p.dtype))
+    has_src_feats = 'source_features' in encoder_outputs
+    if has_src_feats:
+      src_aligned = self._AlignSourceFeatures(
+          encoder_outputs.source_features, p.decode_max_output_frames)
+      grouped_src = tf.reshape(
+          src_aligned,
+          [batch_size, num_steps, p.feature_dims * p.reduction_factor])
+      step_features_t = tf.transpose(
+          grouped_src[:, :, -p.feature_dims:], [1, 0, 2])
+      aligned_ctx_t = self._BuildAlignedContext(encoder_outputs, num_steps)
+    else:
+      step_features_t = None
+      aligned_ctx_t = None
+
     zero_pad = tf.zeros([batch_size, 1], dtype=p.dtype)
+    first_in = py_utils.NestedMap()
+    if step_features_t is not None:
+      first_in.features = step_features_t[0]
+      first_in.aligned_context = aligned_ctx_t[0]
 
-    first_out, _ = self.eval_step.FProp(
-        theta.eval_step, prepared, zero_in, zero_pad, state0)
+    first_out, _ = self.step.FProp(
+        theta.step,
+        prepared,
+        first_in,
+        zero_pad,
+        state0,
+        is_eval_loop=True)
     init_ta = py_utils.Transform(
         lambda x: tf.TensorArray(
             dtype=x.dtype, size=num_steps, element_shape=x.shape),
@@ -434,8 +547,17 @@ class FbeDecoderV1(base_layer.BaseLayer):
           t < num_steps, tf.logical_not(tf.reduce_all(state.done)))
 
     def _body(t, state, out_ta):
-      step_out, next_state = self.eval_step.FProp(
-          theta.eval_step, prepared, zero_in, zero_pad, state)
+      step_in = py_utils.NestedMap()
+      if step_features_t is not None:
+        step_in.features = step_features_t[t]
+        step_in.aligned_context = aligned_ctx_t[t]
+      step_out, next_state = self.step.FProp(
+          theta.step,
+          prepared,
+          step_in,
+          zero_pad,
+          state,
+          is_eval_loop=True)
       out_ta = py_utils.Transform(
           lambda ta, val: ta.write(t, val), out_ta, step_out)
       return t + 1, next_state, out_ta
@@ -466,7 +588,8 @@ class FbeDecoderV1(base_layer.BaseLayer):
     else:
       frame_pad = step_pad
 
-    return self._FormatOutputs(theta, stacked, frame_pad)
+    return self._FormatOutputs(
+        theta, stacked, frame_pad, encoder_outputs=encoder_outputs)
 
 
 class MultiSourceFbeDecoderV1(FbeDecoderV1):

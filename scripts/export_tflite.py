@@ -4,6 +4,7 @@
 import argparse
 import os
 import sys
+from absl import app
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -90,4 +91,4 @@ def main():
 
 
 if __name__ == '__main__':
-  main()
+  app.run(lambda _: main(), argv=sys.argv[:1])

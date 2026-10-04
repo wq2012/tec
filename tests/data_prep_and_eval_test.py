@@ -64,7 +64,8 @@ class DataPrepAndEvaluationTest(unittest.TestCase):
     mcd_zero = evaluation.compute_mcd(ref_mel, ref_mel)
     self.assertAlmostEqual(0.0, mcd_zero, places=5)
 
-    noisy_mel = ref_mel + 0.5
+    noisy_mel = ref_mel + rng.normal(0.0, 0.5, size=(20, 128)).astype(
+        np.float32)
     mcd_noisy = evaluation.compute_mcd(ref_mel, noisy_mel)
     self.assertGreater(mcd_noisy, 0.0)
 
@@ -90,6 +91,18 @@ class DataPrepAndEvaluationTest(unittest.TestCase):
         estimates['TEC']['flops'], estimates['AEC-Seq2seq']['flops'])
     self.assertLess(estimates['TEC']['side_input_bytes'], 1024.0)
     self.assertEqual(240000.0, estimates['AEC-Seq2seq']['side_input_bytes'])
+
+  def testResamplingAndShorterInterferingPadding(self):
+    orig = np.sin(np.linspace(0, 6.28, 2205, dtype=np.float32)) * 0.4
+    resampled = data_prep.resample_waveform(orig, 22050, 24000)
+    self.assertEqual(2400, len(resampled))
+
+    clean = np.ones(1200, dtype=np.float32) * 0.1
+    short_int = np.ones(600, dtype=np.float32) * 0.2
+    mixed, padded_clean = data_prep.mix_waveforms_at_snr(
+        clean, short_int, snr_db=0.0)
+    self.assertEqual(1200, len(mixed))
+    self.assertEqual(1200, len(padded_clean))
 
 
 if __name__ == '__main__':

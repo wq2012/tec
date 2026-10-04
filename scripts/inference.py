@@ -4,6 +4,7 @@
 import argparse
 import os
 import sys
+from absl import app
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tec import aec_model  # noqa: E402
@@ -96,4 +97,4 @@ def main():
 
 
 if __name__ == '__main__':
-  main()
+  app.run(lambda _: main(), argv=sys.argv[:1])

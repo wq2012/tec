@@ -48,7 +48,12 @@ class AecModel(tec_model.TecModel):
         encoded=py_utils.NestedMap(
             source_0=mix_enc.encoded, source_1=ref_enc.encoded),
         padding=py_utils.NestedMap(
-            source_0=mix_enc.padding, source_1=ref_enc.padding))
+            source_0=mix_enc.padding, source_1=ref_enc.padding),
+        source_features=input_batch.src.source_features,
+        source_feature_paddings=input_batch.src.source_feature_paddings,
+        interfering_features=input_batch.src.interfering_features,
+        interfering_feature_paddings=(
+            input_batch.src.interfering_feature_paddings))
 
 
 class NlmsAec:

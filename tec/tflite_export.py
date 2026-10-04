@@ -22,6 +22,8 @@ def export_to_tflite(
   with graph.as_default():
     cfg = model_config_cls()
     task_p = cfg.Task()
+    if decode_steps % task_p.decoder.reduction_factor != 0:
+      task_p.decoder.reduction_factor = 1
     task_p.decoder.decode_max_output_frames = decode_steps
     task_p.waveform_processor = None
     task = task_p.Instantiate()

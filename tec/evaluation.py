@@ -62,21 +62,22 @@ def compute_mcd(
 ) -> float:
   """Computes Mel Cepstral Distortion (MCD) in dB between two spectrograms.
 
-  Implements the MCD metric from Section 3.2 of the paper:
-    MCD = (10 / ln(10)) * sqrt(2) * DTW_dist(MFCC_ref, MFCC_pred) / T_ref
+  Matches the MCD metric implementation from Section 3.2 of the paper
+  (excluding the 0th cepstral coefficient c_0, using MFCC indices 1..12,
+  and normalizing the DTW Euclidean distance by max(T_ref, T_pred)).
   """
-  mfcc_ref = compute_mfcc_from_log_mel(log_mel_ref, num_mfccs=num_mfccs)
-  mfcc_pred = compute_mfcc_from_log_mel(log_mel_pred, num_mfccs=num_mfccs)
+  mfcc_ref = compute_mfcc_from_log_mel(log_mel_ref, num_mfccs=num_mfccs)[:, 1:]
+  mfcc_pred = compute_mfcc_from_log_mel(
+      log_mel_pred, num_mfccs=num_mfccs)[:, 1:]
 
-  unit_scale = 10.0 / np.log(10.0) * np.sqrt(2.0)
   if use_dtw:
     total_dist, _ = compute_dtw_distance(mfcc_ref, mfcc_pred)
-    return float(unit_scale * total_dist / len(mfcc_ref))
+    return float(total_dist / max(len(mfcc_ref), len(mfcc_pred)))
 
   min_len = min(len(mfcc_ref), len(mfcc_pred))
   frame_dists = np.linalg.norm(
       mfcc_ref[:min_len] - mfcc_pred[:min_len], axis=-1)
-  return float(unit_scale * np.mean(frame_dists))
+  return float(np.mean(frame_dists))
 
 
 def normalize_transcript(text: str) -> str:

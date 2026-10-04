@@ -15,23 +15,38 @@ from tec import data_prep  # noqa: E402
 def _load_manifest_csv(
     csv_path: str,
     sample_rate: int = 24000,
+    max_utterances: int = 0,
+    min_duration_sec: float = 1.0,
+    max_duration_sec: float = 8.0,
+    seed: int = 0,
 ) -> List[data_prep.UtteranceRecord]:
   """Loads `UtteranceRecord` items from a manifest CSV file."""
-  records = []
   with open(csv_path, 'r', encoding='utf-8') as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-      wav, sr = data_prep.read_wav_file(row['wav_path'])
-      if sr != sample_rate:
-        raise ValueError(
-            f'Expected sample rate {sample_rate} Hz for {row["wav_path"]}, '
-            f'got {sr} Hz')
-      records.append(
-          data_prep.UtteranceRecord(
-              utt_id=row['utt_id'],
-              waveform=wav,
-              transcript=row['transcript'],
-              sample_rate=sr))
+    all_rows = list(csv.DictReader(f))
+
+  rng = np.random.RandomState(seed)
+  indices = rng.permutation(len(all_rows))
+  min_samples = int(min_duration_sec * sample_rate)
+  max_samples = (
+      int(max_duration_sec * sample_rate) if max_duration_sec > 0 else 0)
+
+  records = []
+  for idx in indices:
+    row = all_rows[int(idx)]
+    wav, sr = data_prep.read_wav_file(
+        row['wav_path'], target_sample_rate=sample_rate)
+    if len(wav) < min_samples:
+      continue
+    if max_samples > 0 and len(wav) > max_samples:
+      continue
+    records.append(
+        data_prep.UtteranceRecord(
+            utt_id=row['utt_id'],
+            waveform=wav,
+            transcript=row['transcript'],
+            sample_rate=sr))
+    if max_utterances > 0 and len(records) >= max_utterances:
+      break
   return records
 
 
@@ -107,6 +122,21 @@ def main():
       default=24000,
       help='Audio sample rate in Hz (default 24000).')
   parser.add_argument(
+      '--max_utterances',
+      type=int,
+      default=0,
+      help='Optional limit on number of clean utterances to process (0 = all).')
+  parser.add_argument(
+      '--min_duration_sec',
+      type=float,
+      default=1.0,
+      help='Minimum utterance duration in seconds.')
+  parser.add_argument(
+      '--max_duration_sec',
+      type=float,
+      default=8.0,
+      help='Maximum utterance duration in seconds (0 = unlimited).')
+  parser.add_argument(
       '--generate_synthetic',
       action='store_true',
       help='If set, generate synthetic utterances instead of reading CSVs.')
@@ -131,9 +161,20 @@ def main():
       raise ValueError(
           'Either --generate_synthetic or both --clean_manifest_csv and '
           '--interfering_manifest_csv must be provided.')
-    clean_utts = _load_manifest_csv(args.clean_manifest_csv, args.sample_rate)
+    clean_utts = _load_manifest_csv(
+        args.clean_manifest_csv,
+        sample_rate=args.sample_rate,
+        max_utterances=args.max_utterances,
+        min_duration_sec=args.min_duration_sec,
+        max_duration_sec=args.max_duration_sec,
+        seed=args.seed)
     interfering_utts = _load_manifest_csv(
-        args.interfering_manifest_csv, args.sample_rate)
+        args.interfering_manifest_csv,
+        sample_rate=args.sample_rate,
+        max_utterances=args.max_utterances,
+        min_duration_sec=args.min_duration_sec,
+        max_duration_sec=args.max_duration_sec,
+        seed=args.seed + 100)
 
   num_written = data_prep.prepare_tfrecord_dataset(
       clean_utterances=clean_utts,

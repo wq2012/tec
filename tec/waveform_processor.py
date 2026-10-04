@@ -140,13 +140,17 @@ class WaveformProcessor(base_layer.BaseLayer):
           raw_spectrograms=raw_spec,
           paddings=frame_paddings)
 
-  def SpectrogramsToWaveforms(self, mel_spectrograms,
-                              spectrogram_paddings=None):
+  def SpectrogramsToWaveforms(self,
+                              mel_spectrograms,
+                              spectrogram_paddings=None,
+                              reference_waveforms=None):
     """Synthesizes time-domain waveforms from log-Mel spectrograms.
 
     Args:
       mel_spectrograms: Float tensor of shape [batch, frames, num_mel_bins].
       spectrogram_paddings: Optional float tensor of shape [batch, frames].
+      reference_waveforms: Optional microphone mixture waveforms of shape
+        [batch, num_samples] used for phase-preserving Mel-band gain synthesis.
 
     Returns:
       Tuple of (waveforms, waveform_paddings) of shape [batch, num_samples].
@@ -160,13 +164,57 @@ class WaveformProcessor(base_layer.BaseLayer):
       mel_mag = (
           tf.exp(mel_spectrograms)
           if p.log_dynamic_range_compression else mel_spectrograms)
+      valid_frame_mask = 1.0 - tf.expand_dims(spectrogram_paddings, axis=-1)
+      mel_mag *= valid_frame_mask
 
-      mel_pinv = tf.linalg.pinv(self._mel_weight_matrix())
-      linear_mag = tf.tensordot(mel_mag, mel_pinv, axes=[[2], [0]])
-      linear_mag = tf.maximum(float(p.magnitude_floor), linear_mag)
-      linear_mag *= (1.0 - tf.expand_dims(spectrogram_paddings, axis=-1))
-
-      waveforms = self._griffin_lim_reconstruct(linear_mag)
+      if reference_waveforms is not None:
+        ref_stft = tf.signal.stft(
+            reference_waveforms,
+            frame_length=self._frame_length_samples,
+            frame_step=self._frame_step_samples,
+            fft_length=p.fft_size,
+            window_fn=tf.signal.hann_window,
+            pad_end=False)
+        num_pred_frames = tf.shape(mel_mag)[1]
+        num_ref_frames = tf.shape(ref_stft)[1]
+        common_frames = tf.minimum(num_pred_frames, num_ref_frames)
+        ref_stft_slice = ref_stft[:, :common_frames, :]
+        ref_mag = tf.abs(ref_stft_slice)
+        mel_matrix = self._mel_weight_matrix()
+        ref_mel_mag = tf.tensordot(ref_mag, mel_matrix, axes=[[2], [0]])
+        floor = float(p.magnitude_floor)
+        mel_gain = tf.clip_by_value(
+            mel_mag[:, :common_frames, :] / tf.maximum(ref_mel_mag, floor),
+            0.0,
+            1.2)
+        raw_weights = tf.signal.linear_to_mel_weight_matrix(
+            num_mel_bins=p.num_mel_bins,
+            num_spectrogram_bins=self.num_fft_bins,
+            sample_rate=p.sampling_rate,
+            lower_edge_hertz=p.mel_lower_edge_hertz,
+            upper_edge_hertz=p.mel_upper_edge_hertz,
+            dtype=p.dtype)
+        row_sums = tf.reduce_sum(raw_weights, axis=1, keepdims=True)
+        mel_to_lin = tf.transpose(raw_weights / tf.maximum(row_sums, 1e-12))
+        linear_gain = tf.tensordot(mel_gain, mel_to_lin, axes=[[2], [0]])
+        enhanced_stft = ref_stft_slice * tf.cast(linear_gain, tf.complex64)
+        rem_frames = num_pred_frames - common_frames
+        enhanced_stft = tf.pad(
+            enhanced_stft, [[0, 0], [0, rem_frames], [0, 0]])
+        inv_window_fn = tf.signal.inverse_stft_window_fn(
+            self._frame_step_samples, forward_window_fn=tf.signal.hann_window)
+        waveforms = tf.signal.inverse_stft(
+            enhanced_stft,
+            frame_length=self._frame_length_samples,
+            frame_step=self._frame_step_samples,
+            fft_length=p.fft_size,
+            window_fn=inv_window_fn)
+      else:
+        mel_pinv = tf.linalg.pinv(self._mel_weight_matrix())
+        linear_mag = tf.tensordot(mel_mag, mel_pinv, axes=[[2], [0]])
+        linear_mag = tf.maximum(float(p.magnitude_floor), linear_mag)
+        linear_mag *= valid_frame_mask
+        waveforms = self._griffin_lim_reconstruct(linear_mag)
 
       batch_size = tf.shape(spectrogram_paddings)[0]
       num_frames = tf.shape(spectrogram_paddings)[1]

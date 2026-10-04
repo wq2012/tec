@@ -7,12 +7,23 @@
 
 ## Introduction
 
-This repository provides a standalone, open-source Python implementation of
+This repository provides a standalone, open-source Python reproduction of
 **Textual Echo Cancellation (TEC)** based on the IEEE SLT 2021 paper:
 
 > **Textual Echo Cancellation**
 > *Shaojin Ding, Ye Jia, Ke Hu, Quan Wang*
 > Paper: [https://arxiv.org/pdf/2008.06006](https://arxiv.org/pdf/2008.06006) | Audio Demo Page: [https://google.github.io/speaker-id/publications/TEC/](https://google.github.io/speaker-id/publications/TEC/)
+
+> [!NOTE]
+> **Open-Source Reproduction Notice**: This library is an independent
+> open-source reproduction of the published paper above. It does **not** use the
+> exact same codebase as the original paper, which was developed on top of
+> Google's internal software infrastructure (including internal training
+> frameworks, acoustic frontends, room simulators, WaveRNN vocoders, and ASR
+> evaluation pipelines). Instead, all modules in this repository are newly
+> implemented from scratch using open-source [`lingvo`](https://github.com/tensorflow/lingvo)
+> and `tensorflow` to make the architecture, data preparation, training,
+> evaluation, and TFLite export accessible to the broader research community.
 
 When a user speaks to a smart speaker or voice-enabled device while the device
 is playing back a Text-to-Speech (TTS) response, the microphone captures a
@@ -176,41 +187,58 @@ python3 scripts/export_tflite.py \
 
 ---
 
-## Published Paper Results
+## Published Paper Reference Results
 
-The following benchmark results are reported in **Table 3** and **Table 4** of
-the original paper ([arXiv:2008.06006v4](https://arxiv.org/pdf/2008.06006)) on
-24 kHz LibriTTS mixed at 0 dB SNR with reverberant LJSpeech (single interfering
-speaker) and VCTK (multiple interfering speakers):
+For reference, **Table 3** of the original paper
+([arXiv:2008.06006v4](https://arxiv.org/pdf/2008.06006)) reported the following
+results using Google's internal speech infrastructure on 24 kHz LibriTTS mixed
+at 0 dB SNR with reverberant LJSpeech (single interfering speaker) and VCTK
+(multiple interfering speakers):
 
-### Speech Enhancement Quality (Paper Table 3)
-
-| Dataset | System | Side Input | WER (%) $\downarrow$ | MCD (dB) $\downarrow$ | MOS $\uparrow$ |
-| :--- | :--- | :--- | :---: | :---: | :---: |
-| **Single Interfering Speaker** *(LibriTTS + LJSpeech)* | Clean (Upper Bound) | — | 7.6 | — | 4.30 $\pm$ 0.06 |
-| | Reverberant + Noisy | None | 75.5 | 13.78 | 1.56 $\pm$ 0.08 |
-| | AEC-NLMS | Audio | 76.2 | 15.27 | 1.66 $\pm$ 0.08 |
-| | Vanilla-Seq2seq | None | 30.8 | 7.12 | 2.86 $\pm$ 0.14 |
-| | AEC-Seq2seq | Audio | 27.6 | 7.04 | 2.94 $\pm$ 0.14 |
-| | **TEC (Proposed)** | **Text** | **26.8** | **6.90** | **2.98 $\pm$ 0.13** |
-| **Multi Interfering Speakers** *(LibriTTS + VCTK)* | Clean (Upper Bound) | — | 7.6 | — | — |
-| | Reverberant + Noisy | None | 74.1 | 12.16 | — |
-| | AEC-NLMS | Audio | 73.1 | 15.32 | — |
-| | Vanilla-Seq2seq | None | 32.1 | 7.05 | — |
-| | AEC-Seq2seq | Audio | 28.0 | 6.80 | — |
-| | **TEC (Proposed)** | **Text** | **24.6** | **6.82** | — |
-
-### Computational Complexity & Side-Input Bandwidth (Paper Table 4, 5s Utterance)
-
-| System | Side Input Payload | Total FLOPS |
-| :--- | :---: | :---: |
-| Vanilla-Seq2seq | 0 KB | $2.1 \times 10^9$ |
-| AEC-Seq2seq | ~240 KB (24 kHz 16-bit audio) | $2.5 \times 10^9$ |
-| **TEC (Proposed)** | **< 1 KB (TTS text)** | **$2.1 \times 10^9$** |
+| Condition | Method | WER (%) test-clean $\downarrow$ | WER (%) test-other $\downarrow$ | MCD (dB) test-clean $\downarrow$ | MCD (dB) test-other $\downarrow$ | MOS test-clean $\uparrow$ | MOS test-other $\uparrow$ | Side Input (KB) $\downarrow$ | GFLOPS $\downarrow$ |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Ground-truth LibriTTS** | — | 2.30 | 4.50 | 0.00 | 0.00 | 4.43 $\pm$ 0.04 | 3.82 $\pm$ 0.06 | — | — |
+| **Single interfering voice** *(LibriTTS + LJSpeech)* | Microphone signal | 89.9 | 120.5 | 18.83 | 21.44 | — | — | — | — |
+| | AEC-NLMS | 48.6 | 60.1 | 12.26 | 12.57 | 1.95 $\pm$ 0.10 | 1.28 $\pm$ 0.09 | 310 | 0 |
+| | Vanilla-Seq2seq | 25.4 | 54.0 | 7.85 | 8.84 | 1.99 $\pm$ 0.06 | 1.47 $\pm$ 0.05 | 0 | 6.32 |
+| | AEC-Seq2seq | 8.30 | 24.3 | 6.38 | 7.07 | 2.77 $\pm$ 0.07 | 1.90 $\pm$ 0.06 | 310 | 9.51 |
+| | **TEC (proposed)** | **15.5** | **39.8** | **7.51** | **8.54** | **2.20 $\pm$ 0.07** | **1.65 $\pm$ 0.06** | **0.10** | **7.27** |
+| **Multiple interfering voices** *(LibriTTS + VCTK)* | Microphone signal | 29.7 | 44.6 | 10.75 | 12.88 | — | — | — | — |
+| | AEC-NLMS | 15.5 | 35.5 | 6.57 | 8.13 | 2.06 $\pm$ 0.11 | 1.60 $\pm$ 0.08 | 230 | 0 |
+| | Vanilla-Seq2seq | 19.7 | 38.7 | 7.53 | 8.87 | 2.16 $\pm$ 0.07 | 1.50 $\pm$ 0.05 | 0 | 6.32 |
+| | AEC-Seq2seq | 6.90 | 19.8 | 5.04 | 5.72 | 2.90 $\pm$ 0.07 | 2.03 $\pm$ 0.07 | 230 | 8.62 |
+| | **TEC (proposed)** | **14.8** | **32.5** | **6.46** | **7.71** | **2.39 $\pm$ 0.07** | **1.70 $\pm$ 0.06** | **0.06** | **6.90** |
 
 <p align="center">
   <img src="resources/results.png" alt="Spectrogram Comparison" width="600" />
 </p>
+
+### Open-Source Reproduction Results
+
+Using the standalone data preparation (`scripts/prepare_data.py`), training
+(`scripts/train.py`), and evaluation (`scripts/evaluate.py`) pipelines in this
+repository on the open-source **LibriTTS** (`train-clean-100`, `test-clean`,
+`test-other`), **LJSpeech-1.1** (90%/10% split), and **VCTK-0.92** (90%/10%
+per-speaker split across 109 speakers) datasets at 24 kHz (mixed at 0 dB SNR
+with synthetic room impulse responses at $\text{RT}_{60} = 0.25\text{ s}$,
+trained for 60 steps on CPU with `batch_size=4, learning_rate=1e-3`, and
+evaluated with local `Qwen3-ASR-0.6B-F16` via `audio.cpp` on 20 utterances per
+test split):
+
+| Condition | Method | WER (%) test-clean $\downarrow$ | WER (%) test-other $\downarrow$ | MCD (dB) test-clean $\downarrow$ | MCD (dB) test-other $\downarrow$ | Side Input test-clean (KB) $\downarrow$ | Side Input test-other (KB) $\downarrow$ |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Ground-truth LibriTTS** | `GroundTruth` | 3.52 (7/199) | 6.78 (12/177) | 0.00 | 0.00 | 0.000 | 0.000 |
+| **Single interfering voice** *(LibriTTS + LJSpeech)* | `MicrophoneSignal` | 90.45 (180/199) | 114.12 (202/177) | 12.86 | 14.61 | 0.000 | 0.000 |
+| | `NlmsAec` (AEC-NLMS) | 88.44 (176/199) | 107.34 (190/177) | 12.80 | 14.48 | 243.465 | 209.085 |
+| | `NoSideInputSingleInterfering` (Vanilla-Seq2seq) | 45.23 (90/199) | 91.53 (162/177) | 9.58 | 11.34 | 0.000 | 0.000 |
+| | `AecSingleInterfering` (AEC-Seq2seq) | 12.06 (24/199) | 23.16 (41/177) | 8.85 | 9.86 | 243.465 | 209.085 |
+| | **`TecSingleInterfering` (TEC)** | **21.61 (43/199)** | **46.89 (83/177)** | **8.24** | **9.28** | **0.076** | **0.068** |
+| **Ground-truth LibriTTS (Multi split)** | `GroundTruth` | 5.03 (10/199) | 7.82 (19/243) | 0.00 | 0.00 | 0.000 | 0.000 |
+| **Multiple interfering voices** *(LibriTTS + VCTK)* | `MicrophoneSignal` | 34.17 (68/199) | 48.97 (119/243) | 7.67 | 7.70 | 0.000 | 0.000 |
+| | `NlmsAec` (AEC-NLMS) | 28.64 (57/199) | 34.98 (85/243) | 7.92 | 8.40 | 186.922 | 206.759 |
+| | `NoSideInputMultiInterfering` (Vanilla-Seq2seq) | 31.16 (62/199) | 42.39 (103/243) | 7.93 | 8.72 | 0.000 | 0.000 |
+| | `AecMultiInterfering` (AEC-Seq2seq) | 8.54 (17/199) | 22.22 (54/243) | 7.80 | 7.88 | 186.922 | 206.759 |
+| | **`TecMultiInterfering` (TEC)** | **26.63 (53/199)** | **45.27 (110/243)** | **7.96** | **8.40** | **0.037** | **0.039** |
 
 ---
 

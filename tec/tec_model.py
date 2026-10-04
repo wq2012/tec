@@ -53,14 +53,19 @@ class TecModel(base_model.BaseTask):
     speech_enc = self.encoder_speech.FProp(theta.encoder_speech, speech_in)
 
     if p.encoder is None:
-      return speech_enc
+      out = speech_enc.DeepCopy()
+      out.source_features = input_batch.src.source_features
+      out.source_feature_paddings = input_batch.src.source_feature_paddings
+      return out
 
     text_enc = self.encoder.FProp(theta.encoder, input_batch.src)
     return py_utils.NestedMap(
         encoded=py_utils.NestedMap(
             source_0=speech_enc.encoded, source_1=text_enc.encoded),
         padding=py_utils.NestedMap(
-            source_0=speech_enc.padding, source_1=text_enc.padding))
+            source_0=speech_enc.padding, source_1=text_enc.padding),
+        source_features=input_batch.src.source_features,
+        source_feature_paddings=input_batch.src.source_feature_paddings)
 
   def ComputePredictions(self, theta, input_batch):
     """Computes teacher-forced spectrogram predictions."""
@@ -76,7 +81,7 @@ class TecModel(base_model.BaseTask):
         theta.decoder, predictions, input_batch.tgt)
 
   def Decode(self, input_batch):
-    """Runs autoregressive inference and Griffin-Lim waveform synthesis."""
+    """Runs autoregressive inference and waveform synthesis."""
     p = self.params
     theta = self.theta
     with tf.name_scope('decode'):
@@ -92,8 +97,13 @@ class TecModel(base_model.BaseTask):
           attention=decoded.attention)
 
       if p.waveform_processor:
+        ref_wav = (
+            input_batch.src.source_waveforms
+            if 'source_waveforms' in input_batch.src else None)
         pred_wav, pred_pad = self.waveform_processor.SpectrogramsToWaveforms(
-            decoded.feature_preds, decoded.paddings)
+            decoded.feature_preds,
+            decoded.paddings,
+            reference_waveforms=ref_wav)
         out.predicted_waveforms = pred_wav
         out.predicted_waveform_paddings = pred_pad
         out.predicted_waveform_lengths = tf.cast(

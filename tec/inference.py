@@ -50,6 +50,8 @@ class TecInferenceRunner:
               paddings=self._id_pad_ph,
               source_features=mixed_spec.spectrograms,
               source_feature_paddings=mixed_spec.paddings,
+              source_waveforms=self._mixed_wav_ph,
+              source_waveform_paddings=self._mixed_pad_ph,
               interfering_features=int_spec.spectrograms,
               interfering_feature_paddings=int_spec.paddings),
           tgt=py_utils.NestedMap())
