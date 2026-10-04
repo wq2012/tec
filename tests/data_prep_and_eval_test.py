@@ -84,13 +84,19 @@ class DataPrepAndEvaluationTest(unittest.TestCase):
     self.assertEqual(5, wer_sub['total_words'])
 
   def testFlopsAndSideInputEstimates(self):
-    estimates = evaluation.estimate_flops_and_side_input(5.0)
-    self.assertAlmostEqual(2.1e9, estimates['Vanilla-Seq2seq']['flops'])
-    self.assertAlmostEqual(2.5e9, estimates['AEC-Seq2seq']['flops'])
-    self.assertLess(
-        estimates['TEC']['flops'], estimates['AEC-Seq2seq']['flops'])
-    self.assertLess(estimates['TEC']['side_input_bytes'], 1024.0)
-    self.assertEqual(240000.0, estimates['AEC-Seq2seq']['side_input_bytes'])
+    single = evaluation.estimate_flops_and_side_input('single')
+    self.assertAlmostEqual(6.32e9, single['Vanilla-Seq2seq']['flops'])
+    self.assertAlmostEqual(9.51e9, single['AEC-Seq2seq']['flops'])
+    self.assertAlmostEqual(7.27e9, single['TEC']['flops'])
+    self.assertAlmostEqual(0.10, single['TEC']['side_input_kb'])
+    self.assertAlmostEqual(310.0, single['AEC-Seq2seq']['side_input_kb'])
+
+    multi = evaluation.estimate_flops_and_side_input('multi')
+    self.assertAlmostEqual(6.32e9, multi['Vanilla-Seq2seq']['flops'])
+    self.assertAlmostEqual(8.62e9, multi['AEC-Seq2seq']['flops'])
+    self.assertAlmostEqual(6.90e9, multi['TEC']['flops'])
+    self.assertAlmostEqual(0.06, multi['TEC']['side_input_kb'])
+    self.assertAlmostEqual(230.0, multi['AEC-Seq2seq']['side_input_kb'])
 
   def testResamplingAndShorterInterferingPadding(self):
     orig = np.sin(np.linspace(0, 6.28, 2205, dtype=np.float32)) * 0.4

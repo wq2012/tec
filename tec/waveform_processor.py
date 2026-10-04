@@ -15,7 +15,7 @@ def compute_fft_size(frame_length_ms: float, sample_rate_hz: float) -> int:
 class WaveformProcessor(base_layer.BaseLayer):
   """Extracts log-Mel filterbank features and reconstructs waveforms.
 
-  Implements the acoustic frontend described in Section 3.2 and Table 1 of the
+  Implements the acoustic frontend described in Section 2.1 and Table 1 of the
   Textual Echo Cancellation paper (https://arxiv.org/pdf/2008.06006):
   - 24 kHz sampling rate
   - 50 ms Hann window (1,200 samples), 12.5 ms frame shift (300 samples)

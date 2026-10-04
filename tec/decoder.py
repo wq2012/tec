@@ -16,7 +16,7 @@ from tec import multi_source_attention_steps
 class AttentiveFbeDecoderStep(step.Step):
   """Single step of the Tacotron-2 style autoregressive spectrogram decoder.
 
-  Architecture per step (Section 2.3 and Table 1 of the paper):
+  Architecture per step (Section 2.4 and Table 1 of the paper):
   1. Target Pre-Net: 2 fully-connected layers of 256 ReLU units with 0.5
      dropout applied to the previous Mel spectrogram frame.
   2. Unidirectional LSTM stack (2 layers x 256 units) taking the concatenated

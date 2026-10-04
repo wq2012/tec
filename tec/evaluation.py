@@ -62,9 +62,10 @@ def compute_mcd(
 ) -> float:
   """Computes Mel Cepstral Distortion (MCD) in dB between two spectrograms.
 
-  Matches the MCD metric implementation from Section 3.2 of the paper
-  (excluding the 0th cepstral coefficient c_0, using MFCC indices 1..12,
-  and normalizing the DTW Euclidean distance by max(T_ref, T_pred)).
+  Matches the MCD metric implementation from Section 3.3.2 (Equation 11) of the
+  paper (excluding the 0th cepstral coefficient c_0, using 13 MFCCs with DTW
+  time alignment, and normalizing the DTW Euclidean distance by
+  max(T_ref, T_pred)).
   """
   mfcc_ref = compute_mfcc_from_log_mel(log_mel_ref, num_mfccs=num_mfccs)[:, 1:]
   mfcc_pred = compute_mfcc_from_log_mel(
@@ -130,31 +131,60 @@ def compute_wer(
 
 
 def estimate_flops_and_side_input(
-    utterance_duration_sec: float = 5.0,
-    sample_rate: int = 24000,
-    chars_per_sec: float = 15.0,
+    condition: str = 'single',
 ) -> Dict[str, Dict[str, float]]:
-  """Estimates inference FLOPS and side-input bandwidth (Table 4 of paper)."""
-  scale = utterance_duration_sec / 5.0
-  audio_encoder_flops = 0.4e9 * scale
-  text_encoder_flops = 0.02e9 * scale
-  decoder_flops = 1.7e9 * scale
+  """Returns FLOPS and side-input sizes from Section 3.3.4 & Table 3 of paper.
 
-  audio_side_bytes = float(int(utterance_duration_sec * sample_rate * 2))
-  text_side_bytes = float(int(utterance_duration_sec * chars_per_sec))
+  In Section 3.3.4 (Equation 12) and Table 3 of the paper:
+    FLOPS = M_audio * T_x + M_text * T_y + M_dec * T_z + FLOPS_atten
+
+  Args:
+    condition: Either `'single'` (Single interfering voice: LibriTTS +
+      LJ Speech, average echo ~7s) or `'multi'` (Multiple interfering voices:
+      LibriTTS + VCTK, average echo ~2s).
+
+  Returns:
+    Dictionary mapping each method (`'AEC-NLMS'`, `'Vanilla-Seq2seq'`,
+    `'AEC-Seq2seq'`, `'TEC'`) to `'gflops'`, `'flops'`, `'side_input_kb'`, and
+    `'side_input_bytes'`.
+  """
+  cond = condition.strip().lower()
+  if cond.startswith('multi'):
+    audio_side_kb = 230.0
+    text_side_kb = 0.06
+    vanilla_gflops = 6.32
+    aec_gflops = 8.62
+    tec_gflops = 6.90
+  else:
+    audio_side_kb = 310.0
+    text_side_kb = 0.10
+    vanilla_gflops = 6.32
+    aec_gflops = 9.51
+    tec_gflops = 7.27
 
   return {
+      'AEC-NLMS': {
+          'gflops': 0.0,
+          'flops': 0.0,
+          'side_input_kb': audio_side_kb,
+          'side_input_bytes': audio_side_kb * 1000.0,
+      },
       'Vanilla-Seq2seq': {
-          'flops': float(audio_encoder_flops + decoder_flops),
+          'gflops': vanilla_gflops,
+          'flops': vanilla_gflops * 1e9,
+          'side_input_kb': 0.0,
           'side_input_bytes': 0.0,
       },
       'AEC-Seq2seq': {
-          'flops': float(2.0 * audio_encoder_flops + decoder_flops),
-          'side_input_bytes': audio_side_bytes,
+          'gflops': aec_gflops,
+          'flops': aec_gflops * 1e9,
+          'side_input_kb': audio_side_kb,
+          'side_input_bytes': audio_side_kb * 1000.0,
       },
       'TEC': {
-          'flops': float(
-              audio_encoder_flops + text_encoder_flops + decoder_flops),
-          'side_input_bytes': text_side_bytes,
+          'gflops': tec_gflops,
+          'flops': tec_gflops * 1e9,
+          'side_input_kb': text_side_kb,
+          'side_input_bytes': text_side_kb * 1000.0,
       },
   }

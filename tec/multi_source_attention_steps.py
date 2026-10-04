@@ -9,8 +9,8 @@ from lingvo.core import step
 class MultiSourceAttentionStep(step.Step):
   """Attends jointly to the speech encoder and side-input encoder streams.
 
-  Implements the multi-source attention mechanism described in Section 2.2
-  (Equations 4-9) of the Textual Echo Cancellation paper
+  Implements the multi-source attention mechanism described in Section 2.5
+  (Equations 8-10) of the Textual Echo Cancellation paper
   (https://arxiv.org/pdf/2008.06006), combining the context vector from the
   noisy speech encoder (`source_0`) with the context vector from the TTS text
   or reference audio encoder (`source_1`).
