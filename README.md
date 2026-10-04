@@ -214,7 +214,7 @@ at 0 dB SNR with reverberant LJ Speech (single interfering voice) and VCTK
 > - In the paper, models were trained on 2×2 TPU slices with a global batch size of 32 using the Adam optimizer ($\beta_1=0.9$, $\beta_2=0.999$, $\epsilon=10^{-6}$) and an initial learning rate of $10^{-4}$ exponentially decaying to $10^{-5}$ after 50,000 iterations.
 
 <p align="center">
-  <img src="resources/results.png" alt="Spectrogram Comparison" width="600" />
+  <img src="resources/results.png" alt="Table 3: Published Paper Reference Results" width="720" />
 </p>
 
 ### Open-Source Reproduction Results
