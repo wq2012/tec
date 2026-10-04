@@ -1,0 +1,4 @@
+lingvo>=0.10.0
+numpy>=1.19.5
+scipy>=1.5.4
+tensorflow>=2.4.0
