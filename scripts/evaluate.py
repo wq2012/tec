@@ -54,7 +54,7 @@ def _batch_transcribe_waveforms_with_audiocpp(
     threads: int = 8,
     sample_rate: int = 24000,
 ) -> List[str]:
-  """Transcribes a list of waveforms in a single batch call to `audiocpp_cli`."""
+  """Transcribes a batch of waveforms in a single call to `audiocpp_cli`."""
   if not waveforms:
     return []
   with tempfile.TemporaryDirectory() as tmp_dir:
