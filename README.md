@@ -65,6 +65,7 @@ reconstructing the clean user speech spectrogram and waveform.
 <p align="center">
   <img src="resources/Decoder.png" alt="Fig. 3: Diagram of the decoder with multi-source attention" width="360" />
 </p>
+
 - **End-to-End Pipelines & CLI Scripts**:
   - **Dataset Preparation** (`scripts/prepare_data.py`): Pairs clean speech
     (LibriTTS) with longer interfering TTS utterances (LJSpeech / VCTK),
