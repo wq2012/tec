@@ -1,10 +1,27 @@
 """Textual Echo Cancellation (TEC) open-source library."""
 
-from . import data_prep
-from . import evaluation
-from . import tokenizer
+import sys
+import types
 
-__version__ = '0.1.0'
+try:
+  import tensorflow.python.training.tracking  # noqa: F401
+except ModuleNotFoundError:
+  try:
+    from tensorflow.python.trackable import autotrackable
+    _tracking_mod = types.ModuleType('tensorflow.python.training.tracking')
+    _tracking_mod.autotrackable = autotrackable
+    sys.modules['tensorflow.python.training.tracking'] = _tracking_mod
+    sys.modules[
+        'tensorflow.python.training.tracking.autotrackable'
+    ] = autotrackable
+  except ImportError:
+    pass
+
+from . import data_prep  # noqa: E402
+from . import evaluation  # noqa: E402
+from . import tokenizer  # noqa: E402
+
+__version__ = '0.1.2'
 
 UtteranceRecord = data_prep.UtteranceRecord
 resample_waveform = data_prep.resample_waveform

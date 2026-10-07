@@ -2,14 +2,14 @@
 
 import os
 import sys
-from lingvo import compat as tf
-from lingvo.core import py_utils
-from lingvo.core import test_utils
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tec import encoder_speech  # noqa: E402
 from tec import encoder_text  # noqa: E402
 from tec import layers as tec_layers  # noqa: E402
+from lingvo import compat as tf  # noqa: E402
+from lingvo.core import py_utils  # noqa: E402
+from lingvo.core import test_utils  # noqa: E402
 
 
 class LayersAndEncodersTest(test_utils.TestCase):

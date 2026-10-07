@@ -6,10 +6,10 @@ import os
 import sys
 import time
 from absl import app
-from lingvo import compat as tf
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tec import configs  # noqa: E402
+from lingvo import compat as tf  # noqa: E402
 
 _MODEL_MAP = {
     'TecSingleInterfering': configs.TecSingleInterfering,

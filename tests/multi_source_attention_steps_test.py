@@ -2,14 +2,14 @@
 
 import os
 import sys
-from lingvo import compat as tf
-from lingvo.core import attention
-from lingvo.core import py_utils
-from lingvo.core import test_utils
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tec import multi_source_attention_steps  # noqa: E402
+from lingvo import compat as tf  # noqa: E402
+from lingvo.core import attention  # noqa: E402
+from lingvo.core import py_utils  # noqa: E402
+from lingvo.core import test_utils  # noqa: E402
 
 
 class MultiSourceAttentionStepsTest(test_utils.TestCase):

@@ -9,8 +9,6 @@ import sys
 import tempfile
 from typing import Dict, List, Optional, Sequence
 from absl import app
-from lingvo import compat as tf
-from lingvo.core import py_utils
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,6 +17,8 @@ from tec import configs  # noqa: E402
 from tec import data_prep  # noqa: E402
 from tec import evaluation  # noqa: E402
 from tec import waveform_processor  # noqa: E402
+from lingvo import compat as tf  # noqa: E402
+from lingvo.core import py_utils  # noqa: E402
 
 _MODEL_MAP = {
     'TecSingleInterfering': configs.TecSingleInterfering,

@@ -3,14 +3,14 @@
 import os
 import sys
 import tempfile
-from lingvo import compat as tf
-from lingvo.core import test_utils
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tec import configs  # noqa: E402
 from tec import inference  # noqa: E402
 from tec import tflite_export  # noqa: E402
+from lingvo import compat as tf  # noqa: E402
+from lingvo.core import test_utils  # noqa: E402
 
 
 class _TinyTecConfig(configs.TecSingleInterfering):

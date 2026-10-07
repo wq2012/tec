@@ -1,4 +1,8 @@
-lingvo>=0.10.0
-numpy>=1.19.5
-scipy>=1.5.4
-tensorflow>=2.4.0
+googleapis-common-protos==1.63.1
+lingvo==0.12.7
+numpy>=1.19.5,<1.24.0
+protobuf>=3.19.6,<3.20.0
+scipy>=1.5.4,<1.11.0
+tensorflow==2.9.3
+tensorflow-datasets==4.9.0
+tensorflow-metadata==1.13.0

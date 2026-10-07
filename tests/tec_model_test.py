@@ -3,8 +3,6 @@
 import os
 import sys
 import tempfile
-from lingvo import compat as tf
-from lingvo.core import test_utils
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -12,6 +10,8 @@ from tec import aec_model  # noqa: E402
 from tec import configs  # noqa: E402
 from tec import data_prep  # noqa: E402
 from tec import input_generator  # noqa: E402
+from lingvo import compat as tf  # noqa: E402
+from lingvo.core import test_utils  # noqa: E402
 
 
 def _shrink_task_params(task_p):
