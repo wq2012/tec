@@ -188,10 +188,11 @@ python3 scripts/evaluate.py \
 ```bash
 python3 scripts/export_tflite.py \
   --model TecSingleInterfering \
+  --checkpoint_path /tmp/tec_checkpoints/best.ckpt \
   --output_tflite /tmp/tec_model.tflite \
-  --num_frames 32 \
-  --text_length 16 \
-  --decode_steps 8 \
+  --num_frames 200 \
+  --text_length 100 \
+  --decode_steps 200 \
   --quantize \
   --verify
 ```

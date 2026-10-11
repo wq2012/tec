@@ -179,8 +179,8 @@ class TecMultiInterfering(TecBaseConfig):
 
   def Task(self):
     p = super().Task()
-    p.decoder.cusum_k_min_ratio = 0.74
-    p.decoder.cusum_k_max_ratio = 0.87
+    p.decoder.eos_window_min_ratio = 0.74
+    p.decoder.eos_window_max_ratio = 0.87
     return p
 
 
@@ -212,8 +212,8 @@ class NoSideInputMultiInterfering(NoSideInputSingleInterfering):
 
   def Task(self):
     p = super().Task()
-    p.decoder.cusum_k_min_ratio = 0.74
-    p.decoder.cusum_k_max_ratio = 0.87
+    p.decoder.eos_window_min_ratio = 0.74
+    p.decoder.eos_window_max_ratio = 0.87
     return p
 
 
@@ -243,6 +243,6 @@ class AecMultiInterfering(AecSingleInterfering):
 
   def Task(self):
     p = super().Task()
-    p.decoder.cusum_k_min_ratio = 0.74
-    p.decoder.cusum_k_max_ratio = 0.87
+    p.decoder.eos_window_min_ratio = 0.74
+    p.decoder.eos_window_max_ratio = 0.87
     return p

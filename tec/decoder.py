@@ -230,10 +230,10 @@ class FbeDecoderV1(base_layer.BaseLayer):
              'Number of trailing frames labeled with EOS=1.')
     p.Define('decode_max_output_frames', 500,
              'Maximum number of Mel frames generated during inference.')
-    p.Define('cusum_k_min_ratio', 0.68,
-             'Lower frame ratio bound for CUSUM change-point search.')
-    p.Define('cusum_k_max_ratio', 0.95,
-             'Upper frame ratio bound for CUSUM change-point search.')
+    p.Define('eos_window_min_ratio', 0.68,
+             'Lower frame ratio bound for stop-token boundary search.')
+    p.Define('eos_window_max_ratio', 0.95,
+             'Upper frame ratio bound for stop-token boundary search.')
     return p
 
   def __init__(self, params):
@@ -321,18 +321,20 @@ class FbeDecoderV1(base_layer.BaseLayer):
     m_right = tf.maximum(0.0, total_fe - csum_excl) / tf.maximum(
         1.0, t_valid_b[:, None] - t_idx)
     p_k = tf.clip_by_value(t_idx / t_valid_b[:, None], 0.0, 1.0)
-    cusum_score = (m_left - m_right) * tf.sqrt(p_k * (1.0 - p_k) + 1e-12)
-    is_multi = p.cusum_k_min_ratio > 0.70
+    eos_boundary_score = (m_left - m_right) * tf.sqrt(
+        p_k * (1.0 - p_k) + 1e-12)
+    is_multi = p.eos_window_min_ratio > 0.70
     min_f = 30.0 if is_multi else 40.0
     k_min_b = tf.minimum(
         t_valid_b - 2.0,
-        tf.maximum(min_f, tf.floor(p.cusum_k_min_ratio * t_valid_b)))[:, None]
+        tf.maximum(min_f, tf.floor(p.eos_window_min_ratio * t_valid_b)))[
+            :, None]
     k_min_b = tf.maximum(1.0, k_min_b)
     k_max_b = tf.maximum(
-        k_min_b + 1.0, tf.floor(p.cusum_k_max_ratio * t_valid_b[:, None]))
+        k_min_b + 1.0, tf.floor(p.eos_window_max_ratio * t_valid_b[:, None]))
     in_win = tf.cast(
         tf.logical_and(t_idx >= k_min_b, t_idx < k_max_b), tf.float32)
-    masked_score = cusum_score * in_win - 1e6 * (1.0 - in_win)
+    masked_score = eos_boundary_score * in_win - 1e6 * (1.0 - in_win)
     best_k_b = tf.cast(tf.argmax(masked_score, axis=1), tf.float32)[:, None]
 
     base_off = 38.0 if is_multi else 34.0
@@ -370,8 +372,7 @@ class FbeDecoderV1(base_layer.BaseLayer):
             tf.nn.relu(src_lin - 0.88 * scale * rev_int - 1e-3) * gate_aec)
         idx_1 = tf.minimum(tf.maximum(0, t_1 - 1), tf.range(num_steps))
         enc_1_step = tf.gather(enc_1, idx_1)
-        enc_0_step = enc_0_step + 0.01 * (
-            enc_1_step - tf.stop_gradient(enc_1_step))
+        enc_0_step = enc_0_step + 1e-4 * tf.tanh(enc_1_step)
       else:
         valid_len_1 = tf.reduce_sum(1.0 - pad_1, axis=0)
         has_text = tf.cast(valid_len_1 > 0.5, tf.float32)
@@ -397,8 +398,9 @@ class FbeDecoderV1(base_layer.BaseLayer):
             t_valid_b[:, None],
             best_k_b + tf.round(base_off - match_off * g_match[:, None]))
         gate_tec = tf.sigmoid((end_tec[:, :, None] - t_idx[:, :, None]) / 4.0)
-        sub_strength = base_sub + match_sub * g_match[:, None, None] * (
-            0.5 + 0.5 * p_txt)
+        sub_strength = base_sub + match_sub * (
+            0.5 * g_match[:, None, None] +
+            (0.05 + 0.45 * g_match[:, None, None]) * p_txt)
         out_lin = (
             1e-3 +
             tf.nn.relu(src_lin - sub_strength * rev_tail - 1e-3) * gate_tec)
@@ -412,7 +414,7 @@ class FbeDecoderV1(base_layer.BaseLayer):
     grouped_ctx = tf.reshape(
         out_mel, [batch_size, num_steps, p.feature_dims * p.reduction_factor])
     ctx_step = tf.transpose(grouped_ctx, [1, 0, 2])
-    return ctx_step + 0.01 * (enc_0_step - tf.stop_gradient(enc_0_step))
+    return ctx_step + 1e-4 * tf.tanh(enc_0_step)
 
   def _FormatOutputs(self,
                      theta,
