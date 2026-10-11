@@ -58,7 +58,13 @@ def main():
   parser.add_argument(
       '--quantize',
       action='store_true',
-      help='Enable dynamic range quantization.')
+      default=True,
+      help='Enable dynamic range quantization (enabled by default).')
+  parser.add_argument(
+      '--no_quantize',
+      action='store_false',
+      dest='quantize',
+      help='Disable dynamic range quantization and export float32 weights.')
   parser.add_argument(
       '--verify',
       action='store_true',

@@ -237,3 +237,9 @@ def run_inference_on_wav(
         output_wav_path, result['predicted_waveform'], sample_rate=sr)
   result['sample_rate'] = np.asarray(sr, dtype=np.int32)
   return result
+
+
+def run_tflite_inference(*args, **kwargs) -> Dict[str, np.ndarray]:
+  """Executes a converted TEC `.tflite` model via `tec.tflite_export`."""
+  from tec import tflite_export  # pylint: disable=g-import-not-at-top
+  return tflite_export.run_tflite_inference(*args, **kwargs)

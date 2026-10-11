@@ -247,6 +247,7 @@ architectures (**TEC**, **AEC-Seq2seq**, and **Vanilla-Seq2seq**):
 
 ```python
 import os
+import numpy as np
 from huggingface_hub import snapshot_download
 from tec import inference
 
@@ -258,6 +259,13 @@ result = inference.run_inference_on_wav(
     interfering_text="currently in mountain view it is 72 degrees",
     checkpoint_path=os.path.join(model_dir, "best.ckpt"),
     output_wav_path="/tmp/enhanced_clean.wav",
+)
+
+# Or run on-device inference with the quantized TensorFlow Lite model
+tflite_out = inference.run_tflite_inference(
+    tflite_path=os.path.join(model_dir, "model.tflite"),
+    mixed_mel=np.zeros((100, 128), dtype=np.float32),
+    interfering_text="currently in mountain view it is 72 degrees",
 )
 ```
 

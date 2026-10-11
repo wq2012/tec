@@ -113,6 +113,15 @@ class InferenceAndTfliteTest(test_utils.TestCase):
       np.testing.assert_allclose(
           out1['feature_preds'], out2['feature_preds'], atol=0.0, rtol=0.0)
 
+      # Verify high-level inference.run_tflite_inference with 2D mel + text.
+      mel_2d = np.zeros((5, 128), dtype=np.float32)
+      out_hl = inference.run_tflite_inference(
+          tflite_path=tflite_path,
+          mixed_mel=mel_2d,
+          interfering_text='hello world')
+      self.assertEqual((1, 3, 128), out_hl['feature_preds'].shape)
+      self.assertIn('predicted_mel', out_hl)
+
       # Verify AecModel TFLite export exposes distinct interfering_features.
       aec_tflite_path = os.path.join(tmpdir, 'aec_model.tflite')
       aec_bytes = tflite_export.export_to_tflite(

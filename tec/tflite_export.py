@@ -17,7 +17,7 @@ def export_to_tflite(
     num_frames: int = 200,
     text_length: int = 100,
     decode_steps: int = 200,
-    quantize_dynamic_range: bool = False,
+    quantize_dynamic_range: bool = True,
 ) -> bytes:
   """Exports a TEC / AEC / Vanilla-Seq2seq model to a TFLite FlatBuffer."""
   graph = tf.Graph()
@@ -112,58 +112,158 @@ def export_to_tflite(
   return tflite_model
 
 
+def _fit_3d_features(
+    features: np.ndarray,
+    paddings: Optional[np.ndarray],
+    target_frames: int,
+    target_bins: int,
+    pad_value: float = 0.0,
+):
+  """Shapes 2D/3D Mel features and 1D/2D paddings to `[1, target_frames, D]`."""
+  arr = np.asarray(features, dtype=np.float32)
+  if arr.ndim == 2:
+    arr = arr[None, :, :]
+  orig_frames = int(arr.shape[1])
+  if paddings is None:
+    pad = np.zeros((arr.shape[0], orig_frames), dtype=np.float32)
+  else:
+    pad = np.asarray(paddings, dtype=np.float32)
+    if pad.ndim == 1:
+      pad = pad[None, :]
+  if arr.shape[2] != target_bins:
+    if arr.shape[2] > target_bins:
+      arr = arr[:, :, :target_bins]
+    else:
+      arr = np.pad(
+          arr,
+          ((0, 0), (0, 0), (0, target_bins - arr.shape[2])),
+          constant_values=pad_value)
+  if orig_frames > target_frames:
+    arr = arr[:, :target_frames, :]
+    pad = pad[:, :target_frames]
+  elif orig_frames < target_frames:
+    extra = target_frames - orig_frames
+    arr = np.pad(
+        arr, ((0, 0), (0, extra), (0, 0)), constant_values=pad_value)
+    pad = np.pad(pad, ((0, 0), (0, extra)), constant_values=1.0)
+  return arr, pad, orig_frames
+
+
 def run_tflite_inference(
-    tflite_model_or_path,
-    source_features: np.ndarray,
+    tflite_model_or_path=None,
+    source_features: Optional[np.ndarray] = None,
     source_feature_paddings: Optional[np.ndarray] = None,
     interfering_ids: Optional[np.ndarray] = None,
     interfering_id_paddings: Optional[np.ndarray] = None,
     interfering_features: Optional[np.ndarray] = None,
     interfering_feature_paddings: Optional[np.ndarray] = None,
+    tflite_path: Optional[str] = None,
+    mixed_mel: Optional[np.ndarray] = None,
+    interfering_text: Optional[str] = None,
+    interfering_mel: Optional[np.ndarray] = None,
 ) -> Dict[str, np.ndarray]:
   """Executes a converted TEC `.tflite` model using `tf.lite.Interpreter`."""
-  if isinstance(tflite_model_or_path, (bytes, bytearray)):
-    interpreter = tf.lite.Interpreter(model_content=bytes(tflite_model_or_path))
+  from tec import tokenizer as tec_tokenizer  # noqa: E402
+
+  model_ref = (
+      tflite_model_or_path if tflite_model_or_path is not None else tflite_path)
+  if model_ref is None:
+    raise ValueError('Either tflite_model_or_path or tflite_path is required.')
+  if source_features is None and mixed_mel is not None:
+    source_features = mixed_mel
+  if source_features is None:
+    raise ValueError('Either source_features or mixed_mel is required.')
+  if interfering_features is None and interfering_mel is not None:
+    interfering_features = interfering_mel
+  if interfering_ids is None and interfering_text is not None:
+    tok = tec_tokenizer.CharTokenizer(
+        vocab_size=configs.TecBaseConfig.VOCAB_SIZE)
+    texts = (
+        [interfering_text]
+        if isinstance(interfering_text, str) else list(interfering_text))
+    interfering_ids, interfering_id_paddings = tok.batch_encode(texts)
+
+  if isinstance(model_ref, (bytes, bytearray)):
+    interpreter = tf.lite.Interpreter(model_content=bytes(model_ref))
   else:
-    interpreter = tf.lite.Interpreter(model_path=str(tflite_model_or_path))
+    interpreter = tf.lite.Interpreter(model_path=str(model_ref))
   interpreter.allocate_tensors()
 
-  src_feat = np.asarray(source_features, dtype=np.float32)
-  if source_feature_paddings is None:
-    src_pad = np.zeros(src_feat.shape[:2], dtype=np.float32)
-  else:
-    src_pad = np.asarray(source_feature_paddings, dtype=np.float32)
+  input_details = interpreter.get_input_details()
+  target_frames = 200
+  target_bins = 128
+  target_text_len = 100
+  for detail in input_details:
+    name = detail['name']
+    shape = detail['shape']
+    if 'source_features' in name and len(shape) == 3:
+      target_frames = int(shape[1])
+      target_bins = int(shape[2])
+    elif 'interfering_ids' in name and len(shape) == 2:
+      target_text_len = int(shape[1])
 
-  for detail in interpreter.get_input_details():
+  src_feat, src_pad, orig_frames = _fit_3d_features(
+      source_features, source_feature_paddings, target_frames, target_bins)
+
+  if interfering_features is not None:
+    int_feat, int_pad, _ = _fit_3d_features(
+        interfering_features,
+        interfering_feature_paddings,
+        target_frames,
+        target_bins,
+        pad_value=-6.907755)
+  else:
+    int_feat = None
+    int_pad = None
+
+  if interfering_ids is not None:
+    ids = np.asarray(interfering_ids, dtype=np.int32)
+    if ids.ndim == 1:
+      ids = ids[None, :]
+    orig_t = int(ids.shape[1])
+    if interfering_id_paddings is None:
+      id_pad = np.zeros((ids.shape[0], orig_t), dtype=np.float32)
+    else:
+      id_pad = np.asarray(interfering_id_paddings, dtype=np.float32)
+      if id_pad.ndim == 1:
+        id_pad = id_pad[None, :]
+    if orig_t > target_text_len:
+      ids = ids[:, :target_text_len]
+      id_pad = id_pad[:, :target_text_len]
+    elif orig_t < target_text_len:
+      extra_t = target_text_len - orig_t
+      ids = np.pad(ids, ((0, 0), (0, extra_t)), constant_values=0)
+      id_pad = np.pad(id_pad, ((0, 0), (0, extra_t)), constant_values=1.0)
+  else:
+    ids = None
+    id_pad = None
+
+  for detail in input_details:
     name = detail['name']
     if 'source_feature_paddings' in name:
       interpreter.set_tensor(detail['index'], src_pad)
     elif 'source_features' in name:
       interpreter.set_tensor(detail['index'], src_feat)
     elif 'interfering_feature_paddings' in name:
-      if interfering_feature_paddings is None:
-        int_pad = np.zeros(detail['shape'], dtype=np.float32)
-      else:
-        int_pad = np.asarray(interfering_feature_paddings, dtype=np.float32)
-      interpreter.set_tensor(detail['index'], int_pad)
+      val = (
+          int_pad if int_pad is not None
+          else np.zeros(detail['shape'], dtype=np.float32))
+      interpreter.set_tensor(detail['index'], val)
     elif 'interfering_features' in name:
-      if interfering_features is None:
-        int_feat = np.full(detail['shape'], -6.907755, dtype=np.float32)
-      else:
-        int_feat = np.asarray(interfering_features, dtype=np.float32)
-      interpreter.set_tensor(detail['index'], int_feat)
+      val = (
+          int_feat if int_feat is not None
+          else np.full(detail['shape'], -6.907755, dtype=np.float32))
+      interpreter.set_tensor(detail['index'], val)
     elif 'interfering_id_paddings' in name:
-      if interfering_id_paddings is None:
-        id_pad = np.zeros(detail['shape'], dtype=np.float32)
-      else:
-        id_pad = np.asarray(interfering_id_paddings, dtype=np.float32)
-      interpreter.set_tensor(detail['index'], id_pad)
+      val = (
+          id_pad if id_pad is not None
+          else np.zeros(detail['shape'], dtype=np.float32))
+      interpreter.set_tensor(detail['index'], val)
     elif 'interfering_ids' in name:
-      if interfering_ids is None:
-        ids = np.ones(detail['shape'], dtype=np.int32)
-      else:
-        ids = np.asarray(interfering_ids, dtype=np.int32)
-      interpreter.set_tensor(detail['index'], ids)
+      val = (
+          ids if ids is not None
+          else np.ones(detail['shape'], dtype=np.int32))
+      interpreter.set_tensor(detail['index'], val)
 
   interpreter.invoke()
 
@@ -175,4 +275,6 @@ def run_tflite_inference(
     else:
       outputs['feature_preds'] = tensor
     outputs[f'output_{idx}'] = tensor
+  if 'feature_preds' in outputs:
+    outputs['predicted_mel'] = outputs['feature_preds'][0, :orig_frames, :]
   return outputs
