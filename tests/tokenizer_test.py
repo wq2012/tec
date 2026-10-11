@@ -12,16 +12,27 @@ from tec import tokenizer  # noqa: E402
 class TokenizerTest(unittest.TestCase):
 
   def testTextToIdsRoundTrip(self):
-    tok = tokenizer.CharTokenizer(vocab_size=96)
-    text = 'Currently in Mountain View, it is 72 degrees.'
+    tok = tokenizer.CharTokenizer()
+    self.assertEqual(98, tok.vocab_size)
+    text = 'Currently in Mountain View, it is 72 degrees. {|}~<>\\`'
     ids = tok.text_to_ids(text)
     self.assertEqual(tok.eos_id, ids[-1])
-    self.assertTrue(all(0 <= i < 96 for i in ids))
+    self.assertTrue(all(0 <= i < 98 for i in ids))
+    self.assertNotIn(tok.unk_id, ids)
     decoded = tok.ids_to_text(ids)
     self.assertEqual(text, decoded)
 
+  def testAllPrintableAsciiRoundTrip(self):
+    tok = tokenizer.CharTokenizer()
+    all_ascii = ''.join(chr(c) for c in range(32, 127))
+    ids = tok.text_to_ids(all_ascii, append_eos=False)
+    self.assertEqual(95, len(ids))
+    self.assertEqual(95, len(set(ids)))
+    self.assertNotIn(tok.unk_id, ids)
+    self.assertEqual(all_ascii, tok.ids_to_text(ids))
+
   def testBatchEncodePadding(self):
-    tok = tokenizer.CharTokenizer(vocab_size=96)
+    tok = tokenizer.CharTokenizer()
     ids, paddings = tok.batch_encode(['hi', 'hello world'])
     self.assertEqual((2, 12), ids.shape)
     self.assertEqual((2, 12), paddings.shape)

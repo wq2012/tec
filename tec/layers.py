@@ -2,6 +2,7 @@
 
 from lingvo.core import base_layer
 from lingvo.core import layers as lingvo_layers
+from lingvo.core import py_utils
 
 
 class PostEditConvNet(base_layer.BaseLayer):
@@ -49,6 +50,10 @@ class PostEditConvNet(base_layer.BaseLayer):
           filter_shape=shape,
           filter_stride=(1, 1),
           batch_norm=True,
+          bn_decay=0.9,
+          params_init=(
+              py_utils.WeightInit.Uniform(0.01)
+              if is_last else py_utils.WeightInit.Uniform(0.05)),
           activation='NONE' if is_last else 'TANH')
       conv_stack.append(conv_p)
     self.CreateChildren('conv', conv_stack)

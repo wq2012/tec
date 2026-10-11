@@ -10,6 +10,8 @@ from absl import app
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tec import configs  # noqa: E402
 from lingvo import compat as tf  # noqa: E402
+from lingvo.core import cluster_factory  # noqa: E402
+from lingvo.core import py_utils  # noqa: E402
 
 _MODEL_MAP = {
     'TecSingleInterfering': configs.TecSingleInterfering,
@@ -24,6 +26,7 @@ _MODEL_MAP = {
 def run_training(
     model_name: str = 'TecSingleInterfering',
     train_file_pattern: str = '',
+    dev_file_pattern: str = '',
     logdir: str = '/tmp/tec_train',
     max_steps: int = 10,
     batch_size: int = 2,
@@ -31,6 +34,8 @@ def run_training(
     decay_steps: int = 50000,
     decay_rate: float = 0.1,
     save_interval_steps: int = 5,
+    eval_interval_steps: int = 10,
+    eval_batches: int = 4,
     restore_checkpoint: str = '',
 ):
   """Runs a training loop for the specified TEC model configuration."""
@@ -58,6 +63,21 @@ def run_training(
     metrics, _ = task.ComputeLoss(task.theta, predictions, batch)
     loss_tensor = metrics['loss'][0]
 
+    dev_loss_tensor = None
+    if dev_file_pattern:
+      with cluster_factory.SetEval(True):
+        dev_inp_p = cfg.Dev()
+        dev_inp_p.file_pattern = dev_file_pattern
+        dev_inp_p.batch_size = batch_size
+        dev_inp_p.shuffle = False
+        dev_inp_p.repeat = True
+        dev_inp_p.use_synthetic_data = False
+        dev_inp = dev_inp_p.Instantiate()
+        dev_batch = dev_inp.GetPreprocessedInputBatch()
+        dev_preds = task.ComputePredictions(task.theta, dev_batch)
+        dev_metrics, _ = task.ComputeLoss(task.theta, dev_preds, dev_batch)
+        dev_loss_tensor = dev_metrics['loss'][0]
+
     global_step = tf.train.get_or_create_global_step()
     step_float = tf.cast(global_step, tf.float32)
     decayed_lr = learning_rate * tf.pow(
@@ -67,12 +87,15 @@ def run_training(
     optimizer = tf.train.AdamOptimizer(
         learning_rate=lr_tensor, beta1=0.9, beta2=0.999, epsilon=1e-6)
     grads_and_vars = optimizer.compute_gradients(loss_tensor)
-    clipped = [
-        (tf.clip_by_norm(g, 1.0), v)
-        for g, v in grads_and_vars
-        if g is not None
-    ]
-    train_op = optimizer.apply_gradients(clipped, global_step=global_step)
+    non_null = [(g, v) for g, v in grads_and_vars if g is not None]
+    grads = [g for g, _ in non_null]
+    tvars = [v for _, v in non_null]
+    clipped_grads, _ = tf.clip_by_global_norm(grads, 1.0)
+    clipped = list(zip(clipped_grads, tvars))
+
+    bn_updates = tf.get_collection(py_utils.BATCH_NORM_UPDATES)
+    with tf.control_dependencies(bn_updates):
+      train_op = optimizer.apply_gradients(clipped, global_step=global_step)
     saver = tf.train.Saver(max_to_keep=3)
     best_saver = tf.train.Saver(max_to_keep=1)
     best_loss = float('inf')
@@ -97,9 +120,23 @@ def run_training(
             f'total_loss={loss_val:.4f} (pre={pre_val:.4f}, '
             f'post={post_val:.4f})',
             flush=True)
-        if float(loss_val) < best_loss:
-          best_loss = float(loss_val)
-          best_saver.save(sess, os.path.join(logdir, 'best.ckpt'))
+        if dev_loss_tensor is not None:
+          if step_idx % eval_interval_steps == 0 or step_idx == max_steps:
+            val_losses = [
+                float(sess.run(dev_loss_tensor))
+                for _ in range(max(1, eval_batches))
+            ]
+            mean_val_loss = sum(val_losses) / len(val_losses)
+            print(
+                f'  [Validation] step={step_idx} dev_loss={mean_val_loss:.4f}',
+                flush=True)
+            if mean_val_loss < best_loss:
+              best_loss = mean_val_loss
+              best_saver.save(sess, os.path.join(logdir, 'best.ckpt'))
+        else:
+          if float(loss_val) < best_loss:
+            best_loss = float(loss_val)
+            best_saver.save(sess, os.path.join(logdir, 'best.ckpt'))
         if step_idx % save_interval_steps == 0 or step_idx == max_steps:
           ckpt_path = os.path.join(logdir, 'model.ckpt')
           saver.save(sess, ckpt_path, global_step=step_idx)
@@ -121,6 +158,12 @@ def main():
       default='',
       help='Glob pattern of training TFRecord files. If empty, runs on '
       'synthetic data.')
+  parser.add_argument(
+      '--dev_file_pattern',
+      type=str,
+      default='',
+      help='Optional glob pattern of validation TFRecord files for best.ckpt '
+      'selection.')
   parser.add_argument(
       '--logdir',
       type=str,
@@ -149,6 +192,16 @@ def main():
       default=50,
       help='Checkpoint save frequency in steps.')
   parser.add_argument(
+      '--eval_interval_steps',
+      type=int,
+      default=25,
+      help='Validation evaluation frequency in steps.')
+  parser.add_argument(
+      '--eval_batches',
+      type=int,
+      default=4,
+      help='Number of validation batches per evaluation.')
+  parser.add_argument(
       '--restore_checkpoint',
       type=str,
       default='',
@@ -158,12 +211,15 @@ def main():
   run_training(
       model_name=args.model,
       train_file_pattern=args.train_file_pattern,
+      dev_file_pattern=args.dev_file_pattern,
       logdir=args.logdir,
       max_steps=args.max_steps,
       batch_size=args.batch_size,
       learning_rate=args.learning_rate,
       decay_steps=args.decay_steps,
       save_interval_steps=args.save_interval_steps,
+      eval_interval_steps=args.eval_interval_steps,
+      eval_batches=args.eval_batches,
       restore_checkpoint=args.restore_checkpoint)
 
 

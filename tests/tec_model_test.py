@@ -132,6 +132,19 @@ class TecAndAecModelTest(test_utils.TestCase):
     residual_mse = np.mean(np.square(error_sig[2000:] - clean[2000:]))
     self.assertLess(residual_mse, initial_mse * 0.1)
 
+  def testBiClstmEnabledInAllConfigs(self):
+    for cfg_cls in (
+        configs.TecSingleInterfering,
+        configs.TecMultiInterfering,
+        configs.NoSideInputSingleInterfering,
+        configs.NoSideInputMultiInterfering,
+        configs.AecSingleInterfering,
+        configs.AecMultiInterfering,
+    ):
+      task_p = cfg_cls().Task()
+      self.assertEqual(1, task_p.encoder_speech.num_conv_lstm_layers)
+      self.assertEqual(98, cfg_cls.VOCAB_SIZE)
+
 
 if __name__ == '__main__':
   tf.test.main()

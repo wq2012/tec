@@ -55,7 +55,7 @@ def configure_speech_encoder(
 
 
 def configure_text_encoder(
-    vocab_size: int = 96,
+    vocab_size: int = 98,
     embedding_dim: int = 512,
     lstm_cell_size: int = 256,
 ):
@@ -92,7 +92,7 @@ def configure_multi_source_decoder(
   p.step.rnn_cell_tpl = rnn_cell.LSTMCellSimple.Params().Set(
       deterministic=True,
       zo_prob=0.1,
-      params_init=py_utils.WeightInit.Uniform(0.1))
+      params_init=py_utils.WeightInit.Uniform(0.02))
   p.step.target_pre_net.hidden_layer_dims = [256, 256]
   p.step.target_pre_net.dropout.keep_prob = 0.5
   p.step.target_pre_net.dropout.dropout_at_eval = False
@@ -110,7 +110,7 @@ class TecBaseConfig(base_model_params.SingleTaskModelParams):
 
   NUM_MEL_BINS = 128
   SAMPLING_RATE = 24000.0
-  VOCAB_SIZE = 96
+  VOCAB_SIZE = 98
   TRAIN_FILE_PATTERN = ''
   DEV_FILE_PATTERN = ''
   TEST_FILE_PATTERN = ''
@@ -145,7 +145,7 @@ class TecBaseConfig(base_model_params.SingleTaskModelParams):
         num_mel_bins=self.NUM_MEL_BINS,
         lstm_cell_size=256,
         num_lstm_layers=3,
-        num_conv_lstm_layers=0)
+        num_conv_lstm_layers=1)
     p.encoder = configure_text_encoder(
         vocab_size=self.VOCAB_SIZE,
         embedding_dim=512,
@@ -176,7 +176,12 @@ class TecSingleInterfering(TecBaseConfig):
 @model_registry.RegisterSingleTaskModel
 class TecMultiInterfering(TecBaseConfig):
   """TEC configuration for multi-speaker TTS interference (LibriTTS + VCTK)."""
-  pass
+
+  def Task(self):
+    p = super().Task()
+    p.decoder.cusum_k_min_ratio = 0.74
+    p.decoder.cusum_k_max_ratio = 0.87
+    return p
 
 
 @model_registry.RegisterSingleTaskModel
@@ -187,7 +192,7 @@ class NoSideInputSingleInterfering(TecBaseConfig):
     p = super().Task()
     p.name = 'no_side_input'
     p.encoder = None
-    p.encoder_speech.num_conv_lstm_layers = 0
+    p.encoder_speech.num_conv_lstm_layers = 1
     dec_p = tec_decoder.FbeDecoderV1.Params()
     dec_p.feature_dims = p.decoder.feature_dims
     dec_p.source_dim = p.decoder.source_dim
@@ -204,7 +209,12 @@ class NoSideInputSingleInterfering(TecBaseConfig):
 @model_registry.RegisterSingleTaskModel
 class NoSideInputMultiInterfering(NoSideInputSingleInterfering):
   """Vanilla-Seq2seq baseline (no side input) on LibriTTS + VCTK."""
-  pass
+
+  def Task(self):
+    p = super().Task()
+    p.decoder.cusum_k_min_ratio = 0.74
+    p.decoder.cusum_k_max_ratio = 0.87
+    return p
 
 
 @model_registry.RegisterSingleTaskModel
@@ -219,7 +229,9 @@ class AecSingleInterfering(TecBaseConfig):
     p.encoder = None
     p.encoder_speech = base_p.encoder_speech.Copy()
     p.encoder_interfering = base_p.encoder_speech.Copy().Set(
-        name='interfering_speech_encoder')
+        name='interfering_speech_encoder',
+        input_residual_weight=-0.45,
+        active_energy_only=True)
     p.decoder = base_p.decoder
     p.train = base_p.train
     return p
@@ -228,4 +240,9 @@ class AecSingleInterfering(TecBaseConfig):
 @model_registry.RegisterSingleTaskModel
 class AecMultiInterfering(AecSingleInterfering):
   """AEC-Seq2seq baseline (audio side input) on LibriTTS + VCTK."""
-  pass
+
+  def Task(self):
+    p = super().Task()
+    p.decoder.cusum_k_min_ratio = 0.74
+    p.decoder.cusum_k_max_ratio = 0.87
+    return p

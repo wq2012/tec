@@ -2,8 +2,10 @@
 
 from typing import Dict, Optional, Sequence
 from lingvo import compat as tf
+from lingvo.core import cluster_factory
 from lingvo.core import py_utils
 import numpy as np
+from tec import aec_model
 from tec import configs
 from tec import tokenizer as tec_tokenizer
 
@@ -18,7 +20,7 @@ class TecInferenceRunner:
       decode_max_output_frames: Optional[int] = None,
   ):
     self._graph = tf.Graph()
-    with self._graph.as_default():
+    with self._graph.as_default(), cluster_factory.SetEval(True):
       model_p = model_config_cls().Task()
       if decode_max_output_frames is not None:
         model_p.decoder.decode_max_output_frames = decode_max_output_frames
@@ -102,6 +104,12 @@ class TecInferenceRunner:
       interfering_waveforms: Optional[Sequence[np.ndarray]] = None,
   ) -> Dict[str, np.ndarray]:
     """Runs echo cancellation on a batch of mixed waveforms."""
+    if (isinstance(self._task, aec_model.AecModel) and
+        interfering_waveforms is None):
+      raise ValueError(
+          'interfering_waveforms must be provided when running inference '
+          'with an AecModel.')
+
     batch_size = len(mixed_waveforms)
     max_samples = max(len(w) for w in mixed_waveforms)
     mixed_arr = np.zeros((batch_size, max_samples), dtype=np.float32)
@@ -118,8 +126,8 @@ class TecInferenceRunner:
         int_arr[idx, :len(wav)] = wav
         int_pad[idx, :len(wav)] = 0.0
     else:
-      int_arr = mixed_arr
-      int_pad = mixed_pad
+      int_arr = np.zeros_like(mixed_arr)
+      int_pad = np.ones_like(mixed_pad)
 
     if interfering_texts is None:
       interfering_texts = [''] * batch_size
@@ -146,6 +154,8 @@ class TecInferenceRunner:
   def close(self):
     self._sess.close()
 
+
+TecInferenceEngine = TecInferenceRunner
 
 MODEL_MAP = {
     'TecSingleInterfering': configs.TecSingleInterfering,
@@ -204,13 +214,16 @@ def run_inference_on_wav(
     checkpoint_path: Optional[str] = None,
     output_wav_path: Optional[str] = None,
     decode_max_output_frames: Optional[int] = None,
+    target_sample_rate: int = 24000,
 ) -> Dict[str, np.ndarray]:
   """Runs echo cancellation inference on a WAV file and optionally saves it."""
   from tec import data_prep  # pylint: disable=g-import-not-at-top
-  mixed_wav, sr = data_prep.read_wav_file(mixed_wav_path)
+  mixed_wav, sr = data_prep.read_wav_file(
+      mixed_wav_path, target_sample_rate=target_sample_rate)
   int_wav = None
   if interfering_wav_path:
-    int_wav, _ = data_prep.read_wav_file(interfering_wav_path)
+    int_wav, _ = data_prep.read_wav_file(
+        interfering_wav_path, target_sample_rate=target_sample_rate)
   result = run_inference(
       mixed_waveform=mixed_wav,
       model_name=model_name,

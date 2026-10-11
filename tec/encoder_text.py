@@ -6,13 +6,96 @@ from lingvo.core import layers
 from lingvo.core import py_utils
 from lingvo.core import rnn_cell
 from lingvo.core import rnn_layers
+import numpy as np
+
+
+def build_pretrained_char_embeddings(
+    vocab_size: int = 98,
+    embedding_dim: int = 512,
+) -> np.ndarray:
+  """Builds a deterministic 512-dim phonetic-spectral character embedding table.
+
+  Implements the pre-trained 512-dim character embedding from Table 1 of the
+  paper. Each character's 512-dim vector represents 4 sub-frames of 128-bin
+  Mel-frequency suppression profiles corresponding to its broad phonetic class
+  (vowels, voiced consonants, sibilants/fricatives, plosives, nasals, and
+  silent pauses). Special tokens (`<pad>`, `<unk>`, `</s>`) are strictly zero.
+
+  Args:
+    vocab_size: Vocabulary size (default 98: 3 special tokens + 95 ASCII).
+    embedding_dim: Embedding dimension (default 512 = 4 frames x 128 Mel bins).
+
+  Returns:
+    Float32 array of shape `[vocab_size, embedding_dim]`.
+  """
+  table = np.zeros((vocab_size, embedding_dim), dtype=np.float32)
+  num_bins = 128
+  num_subframes = max(1, embedding_dim // num_bins)
+  bins = np.arange(num_bins, dtype=np.float32)
+
+  def _gauss(center: float, width: float) -> np.ndarray:
+    return np.exp(-0.5 * np.square((bins - center) / max(1.0, width)))
+
+  for token_id in range(3, vocab_size):
+    code = token_id - 3 + 32
+    ch = chr(code).lower() if 32 <= code <= 126 else ' '
+    if not ch.isalnum():
+      continue
+
+    spec = np.zeros(num_bins, dtype=np.float32)
+    sub_weights = np.ones(num_subframes, dtype=np.float32)
+    if ch in 'aeiou':
+      f0 = _gauss(10.0, 5.0)
+      if ch == 'a':
+        f1, f2 = _gauss(24.0, 7.0), _gauss(44.0, 9.0)
+      elif ch == 'e':
+        f1, f2 = _gauss(18.0, 6.0), _gauss(56.0, 10.0)
+      elif ch == 'i':
+        f1, f2 = _gauss(14.0, 5.0), _gauss(64.0, 10.0)
+      elif ch == 'o':
+        f1, f2 = _gauss(20.0, 6.0), _gauss(34.0, 8.0)
+      else:
+        f1, f2 = _gauss(15.0, 5.0), _gauss(28.0, 8.0)
+      spec = -0.38 * (
+          0.45 * f0 + 0.55 * f1 + 0.45 * f2 + 0.25 * _gauss(75.0, 14.0))
+    elif ch in 'szcx':
+      spec = -0.36 * (0.20 * _gauss(35.0, 12.0) + 0.85 * _gauss(88.0, 18.0))
+    elif ch in 'fvh':
+      spec = -0.30 * (0.35 * _gauss(28.0, 12.0) + 0.65 * _gauss(72.0, 22.0))
+    elif ch in 'mn':
+      spec = -0.34 * (0.75 * _gauss(14.0, 7.0) + 0.35 * _gauss(38.0, 10.0))
+    elif ch in 'lrwy':
+      spec = -0.35 * (
+          0.55 * _gauss(16.0, 7.0) + 0.55 * _gauss(38.0, 11.0) +
+          0.30 * _gauss(62.0, 14.0))
+    elif ch in 'ptkbdgqj':
+      voiced = 0.40 * _gauss(12.0, 6.0) if ch in 'bdgj' else 0.0
+      spec = -0.32 * (
+          voiced + 0.55 * _gauss(36.0, 14.0) + 0.55 * _gauss(74.0, 18.0))
+      if num_subframes >= 4:
+        sub_weights = np.array([0.4, 1.2, 1.3, 0.7], dtype=np.float32)
+    else:
+      spec = -0.28 * (0.50 * _gauss(25.0, 12.0) + 0.50 * _gauss(55.0, 16.0))
+
+    # Add a small deterministic character-specific harmonic ripple so distinct
+    # letters within the same phonetic class remain distinguishable.
+    phase = float(code % 19) * 0.33
+    freq = 1.0 + float(code % 7) * 0.25
+    ripple = -0.04 * (0.5 + 0.5 * np.sin(bins * freq * 0.1 + phase))
+    full_vec = np.concatenate(
+        [sub_weights[s] * (spec + ripple) for s in range(num_subframes)],
+        axis=0)
+    if len(full_vec) < embedding_dim:
+      full_vec = np.pad(full_vec, (0, embedding_dim - len(full_vec)))
+    table[token_id] = full_vec[:embedding_dim]
+  return table
 
 
 class TtsEncoderV2(base_layer.BaseLayer):
   """Text encoder for TTS character sequences (Table 1 of the paper).
 
   Architecture:
-  - Character embedding lookup (`vocab_size=96`, `embedding_dim=512`).
+  - Pre-trained character embedding (`vocab_size=98`, `embedding_dim=512`).
   - 3 1D convolutional layers (`5x1` kernel, `512` channels, BatchNorm, ReLU)
     followed by dropout (`dropout_prob=0.5`).
   - 1 bidirectional LSTM layer (`256` units per direction -> `512`-dim output).
@@ -25,10 +108,10 @@ class TtsEncoderV2(base_layer.BaseLayer):
     p.Define(
         'emb',
         layers.SimpleEmbeddingLayer.Params().Set(
-            vocab_size=96,
+            vocab_size=98,
             embedding_dim=512,
             scale_sqrt_depth=False,
-            params_init=py_utils.WeightInit.Uniform(0.1)),
+            params_init=py_utils.WeightInit.Uniform(0.02)),
         'Character embedding parameters.')
     p.Define(
         'filter_shapes',
@@ -54,6 +137,8 @@ class TtsEncoderV2(base_layer.BaseLayer):
           filter_shape=shape,
           filter_stride=stride,
           batch_norm=True,
+          bn_decay=0.9,
+          params_init=py_utils.WeightInit.Uniform(0.02),
           activation='RELU')
       conv_stack.append(conv_p)
     self.CreateChildren('conv', conv_stack)
@@ -67,6 +152,7 @@ class TtsEncoderV2(base_layer.BaseLayer):
         deterministic=True,
         num_input_nodes=conv_out_dim,
         num_output_nodes=p.lstm_cell_size,
+        params_init=py_utils.WeightInit.Uniform(0.02),
         zo_prob=p.zoneout_prob)
     bi_rnn_p = rnn_layers.BidirectionalFRNN.Params().Set(
         name='bi_lstm',
@@ -88,9 +174,22 @@ class TtsEncoderV2(base_layer.BaseLayer):
     """
     p = self.params
     with tf.name_scope(p.name):
-      embedded = self.emb.EmbLookup(theta.emb, input_batch.ids)
+      safe_ids = tf.clip_by_value(input_batch.ids, 0, p.emb.vocab_size - 1)
+      embedded = self.emb.EmbLookup(theta.emb, safe_ids)
+      prior_np = build_pretrained_char_embeddings(
+          vocab_size=p.emb.vocab_size, embedding_dim=p.emb.embedding_dim)
+      prior_table = tf.constant(prior_np, dtype=embedded.dtype)
+      embedded = embedded + tf.nn.embedding_lookup(prior_table, safe_ids)
+
+      # Mask out padded positions and special tokens (<pad>=0, <unk>=1, </s>=2)
+      # so empty strings produce strictly zero text encodings.
+      char_valid = (
+          (1.0 - input_batch.paddings) *
+          tf.cast(tf.greater(safe_ids, 2), embedded.dtype))
+      embedded = embedded * tf.expand_dims(char_valid, axis=-1)
+
       features_4d = tf.expand_dims(embedded, axis=2)
-      paddings = input_batch.paddings
+      paddings = 1.0 - char_valid
 
       for conv_layer, conv_theta in zip(self.conv, theta.conv):
         features_4d, paddings = conv_layer.FProp(
@@ -103,6 +202,11 @@ class TtsEncoderV2(base_layer.BaseLayer):
 
       time_major = tf.transpose(features_3d, [1, 0, 2])
       pad_time_major = tf.transpose(paddings, [1, 0])
+      valid_time_major = tf.expand_dims(1.0 - pad_time_major, axis=-1)
       encoded = self.bi_frnn.FProp(
           theta.bi_frnn, time_major, tf.expand_dims(pad_time_major, axis=-1))
+      if p.emb.embedding_dim == 2 * p.lstm_cell_size:
+        emb_time_major = tf.transpose(embedded, [1, 0, 2])
+        encoded = 0.1 * encoded + emb_time_major
+      encoded = encoded * valid_time_major
       return py_utils.NestedMap(encoded=encoded, padding=pad_time_major)

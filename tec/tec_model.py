@@ -135,5 +135,5 @@ class VanillaSeq2SeqModel(TecModel):
     p.name = 'vanilla_seq2seq_model'
     p.encoder = None
     p.decoder = tec_decoder.FbeDecoderV1.Params()
-    p.encoder_speech.num_conv_lstm_layers = 0
+    p.encoder_speech.num_conv_lstm_layers = 1
     return p

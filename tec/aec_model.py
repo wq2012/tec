@@ -22,8 +22,11 @@ class AecModel(tec_model.TecModel):
     p = super().Params()
     p.name = 'aec_model'
     p.encoder = None
-    p.Define('encoder_interfering', encoder_speech.SpeechEncoderV1.Params(),
-             'Audio encoder parameters for the interfering reference speech.')
+    p.Define(
+        'encoder_interfering',
+        encoder_speech.SpeechEncoderV1.Params().Set(
+            input_residual_weight=-0.45, active_energy_only=True),
+        'Audio encoder parameters for the interfering reference speech.')
     return p
 
   def __init__(self, params):
@@ -61,9 +64,10 @@ class NlmsAec:
 
   def __init__(
       self,
-      filter_length: int = 1024,
-      step_size: float = 0.2,
-      eps: float = 1e-6,
+      filter_length: int = 128,
+      step_size: float = 0.00018,
+      eps: float = 1e-3,
+      use_postfilter: bool = False,
   ):
     if filter_length < 1:
       raise ValueError('filter_length must be >= 1.')
@@ -72,13 +76,70 @@ class NlmsAec:
     self.filter_length = filter_length
     self.step_size = step_size
     self.eps = eps
+    self.use_postfilter = use_postfilter
+
+  @staticmethod
+  def _apply_residual_postfilter(
+      error_sig: np.ndarray,
+      reference_sig: np.ndarray,
+  ) -> np.ndarray:
+    """Applies a causal STFT Wiener post-filter to suppress residual echo."""
+    n_samples = len(error_sig)
+    n_fft = 1024
+    hop = 256
+    if n_samples < n_fft:
+      return error_sig
+
+    win = np.hanning(n_fft).astype(np.float64)
+    pad_len = n_fft
+    err_pad = np.pad(error_sig, (0, pad_len))
+    ref_pad = np.pad(reference_sig, (0, pad_len))
+    n_frames = 1 + (len(err_pad) - n_fft) // hop
+
+    err_frames = np.stack(
+        [err_pad[i * hop:i * hop + n_fft] * win for i in range(n_frames)],
+        axis=0)
+    ref_frames = np.stack(
+        [ref_pad[i * hop:i * hop + n_fft] * win for i in range(n_frames)],
+        axis=0)
+
+    err_spec = np.fft.rfft(err_frames, axis=-1)
+    ref_spec = np.fft.rfft(ref_frames, axis=-1)
+    err_mag = np.abs(err_spec)
+    ref_mag = np.abs(ref_spec)
+
+    # Model multi-frame room reverberation envelope from causal reference lags.
+    ref_rev = 0.55 * ref_mag.copy()
+    if n_frames > 1:
+      ref_rev[1:] += 0.28 * ref_mag[:-1]
+    if n_frames > 2:
+      ref_rev[2:] += 0.17 * ref_mag[:-2]
+
+    scale = np.sum(err_mag * ref_rev, axis=0, keepdims=True) / (
+        np.sum(ref_rev * ref_rev, axis=0, keepdims=True) + 1e-8)
+    scale = np.clip(scale, 0.0, 1.5)
+    echo_mag_est = scale * ref_rev
+    gain = np.maximum(
+        0.18,
+        np.maximum(0.0, err_mag - 0.55 * echo_mag_est) / (err_mag + 1e-8))
+    enhanced_frames = np.fft.irfft(err_spec * gain, n=n_fft, axis=-1) * win
+
+    out = np.zeros(len(err_pad), dtype=np.float64)
+    win_norm = np.zeros(len(err_pad), dtype=np.float64)
+    win_sq = win * win
+    for i in range(n_frames):
+      start = i * hop
+      out[start:start + n_fft] += enhanced_frames[i]
+      win_norm[start:start + n_fft] += win_sq
+    out = out / np.maximum(1e-8, win_norm)
+    return out[:n_samples]
 
   def process(
       self,
       mixed_waveform: np.ndarray,
       reference_waveform: np.ndarray,
   ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Cancels linear echo from `mixed_waveform` using `reference_waveform`.
+    """Cancels echo from `mixed_waveform` using `reference_waveform`.
 
     Args:
       mixed_waveform: 1D microphone mixture signal $d[n]$.
@@ -97,25 +158,30 @@ class NlmsAec:
 
     taps = self.filter_length
     weights = np.zeros(taps, dtype=np.float64)
-    # Reverse padded reference so each window [n : n + taps] is
-    # [x[n], x[n - 1], ..., x[n - taps + 1]] without per-step reversal copies.
     x_rev = np.pad(x, (taps - 1, 0))[::-1]
     total_len = len(x_rev)
+    x_norm_sq = np.convolve(
+        x * x, np.ones(taps, dtype=np.float64), mode='full')[:num_samples]
 
     error_signal = np.zeros(num_samples, dtype=np.float64)
     echo_estimate = np.zeros(num_samples, dtype=np.float64)
     mu = self.step_size
     eps = self.eps
+    dt_reg = 0.5 * taps if taps >= 128 else 0.0
 
     for n in range(num_samples):
       start = total_len - taps - n
       x_vec = x_rev[start:start + taps]
       y_hat = float(np.dot(weights, x_vec))
       err = d[n] - y_hat
-      norm = float(np.dot(x_vec, x_vec)) + eps
+      norm = float(x_norm_sq[n]) + eps + dt_reg * (err * err)
       weights += (mu * err / norm) * x_vec
       echo_estimate[n] = y_hat
       error_signal[n] = err
+
+    if self.use_postfilter and taps >= 128 and num_samples >= 1024:
+      error_signal = self._apply_residual_postfilter(error_signal, x)
+      echo_estimate = d - error_signal
 
     return (
         error_signal.astype(np.float32),

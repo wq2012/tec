@@ -3,8 +3,10 @@
 import os
 from typing import Dict, Optional
 from lingvo import compat as tf
+from lingvo.core import cluster_factory
 from lingvo.core import py_utils
 import numpy as np
+from tec import aec_model
 from tec import configs
 
 
@@ -12,14 +14,14 @@ def export_to_tflite(
     output_tflite_path: str,
     model_config_cls=configs.TecSingleInterfering,
     checkpoint_path: Optional[str] = None,
-    num_frames: int = 32,
-    text_length: int = 16,
-    decode_steps: int = 8,
+    num_frames: int = 200,
+    text_length: int = 100,
+    decode_steps: int = 200,
     quantize_dynamic_range: bool = False,
 ) -> bytes:
   """Exports a TEC / AEC / Vanilla-Seq2seq model to a TFLite FlatBuffer."""
   graph = tf.Graph()
-  with graph.as_default():
+  with graph.as_default(), cluster_factory.SetEval(True):
     cfg = model_config_cls()
     task_p = cfg.Task()
     if decode_steps % task_p.decoder.reduction_factor != 0:
@@ -35,6 +37,14 @@ def export_to_tflite(
         name='source_features')
     source_feature_paddings = tf.placeholder(
         tf.float32, shape=[1, num_frames], name='source_feature_paddings')
+    interfering_features = tf.placeholder(
+        tf.float32,
+        shape=[1, num_frames, num_mel_bins],
+        name='interfering_features')
+    interfering_feature_paddings = tf.placeholder(
+        tf.float32,
+        shape=[1, num_frames],
+        name='interfering_feature_paddings')
     interfering_ids = tf.placeholder(
         tf.int32, shape=[1, text_length], name='interfering_ids')
     interfering_id_paddings = tf.placeholder(
@@ -47,8 +57,8 @@ def export_to_tflite(
             paddings=interfering_id_paddings,
             source_features=source_features,
             source_feature_paddings=source_feature_paddings,
-            interfering_features=source_features,
-            interfering_feature_paddings=source_feature_paddings),
+            interfering_features=interfering_features,
+            interfering_feature_paddings=interfering_feature_paddings),
         tgt=py_utils.NestedMap(
             features=tf.zeros(
                 [1, decode_steps, num_mel_bins], dtype=tf.float32),
@@ -59,14 +69,22 @@ def export_to_tflite(
         predictions.feature_preds, name='feature_preds')
     eos_probs = tf.identity(predictions.eos_probs, name='eos_probs')
 
-    input_tensors = [
-        source_features,
-        source_feature_paddings,
-        interfering_ids,
-        interfering_id_paddings,
-    ]
-    if task_p.encoder is None:
+    if isinstance(task, aec_model.AecModel):
+      input_tensors = [
+          source_features,
+          source_feature_paddings,
+          interfering_features,
+          interfering_feature_paddings,
+      ]
+    elif task_p.encoder is None:
       input_tensors = [source_features, source_feature_paddings]
+    else:
+      input_tensors = [
+          source_features,
+          source_feature_paddings,
+          interfering_ids,
+          interfering_id_paddings,
+      ]
     output_tensors = [feature_preds, eos_probs]
 
     with tf.Session(graph=graph) as sess:
@@ -100,6 +118,8 @@ def run_tflite_inference(
     source_feature_paddings: Optional[np.ndarray] = None,
     interfering_ids: Optional[np.ndarray] = None,
     interfering_id_paddings: Optional[np.ndarray] = None,
+    interfering_features: Optional[np.ndarray] = None,
+    interfering_feature_paddings: Optional[np.ndarray] = None,
 ) -> Dict[str, np.ndarray]:
   """Executes a converted TEC `.tflite` model using `tf.lite.Interpreter`."""
   if isinstance(tflite_model_or_path, (bytes, bytearray)):
@@ -120,6 +140,18 @@ def run_tflite_inference(
       interpreter.set_tensor(detail['index'], src_pad)
     elif 'source_features' in name:
       interpreter.set_tensor(detail['index'], src_feat)
+    elif 'interfering_feature_paddings' in name:
+      if interfering_feature_paddings is None:
+        int_pad = np.zeros(detail['shape'], dtype=np.float32)
+      else:
+        int_pad = np.asarray(interfering_feature_paddings, dtype=np.float32)
+      interpreter.set_tensor(detail['index'], int_pad)
+    elif 'interfering_features' in name:
+      if interfering_features is None:
+        int_feat = np.full(detail['shape'], -6.907755, dtype=np.float32)
+      else:
+        int_feat = np.asarray(interfering_features, dtype=np.float32)
+      interpreter.set_tensor(detail['index'], int_feat)
     elif 'interfering_id_paddings' in name:
       if interfering_id_paddings is None:
         id_pad = np.zeros(detail['shape'], dtype=np.float32)

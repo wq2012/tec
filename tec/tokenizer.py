@@ -8,12 +8,13 @@ _PRINTABLE_ASCII = (
     ' !"\'(),-.:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
     '0123456789@#$%&*+/=_~^[]{}|<>\\`'
 )
+VOCAB_SIZE = 98
 
 
 class CharTokenizer:
   """Maps TTS text strings to integer token IDs and padding masks."""
 
-  def __init__(self, vocab_size: int = 96):
+  def __init__(self, vocab_size: int = VOCAB_SIZE):
     self.vocab_size = vocab_size
     tokens = list(_SPECIAL_TOKENS) + list(_PRINTABLE_ASCII)
     while len(tokens) < vocab_size:
@@ -38,11 +39,11 @@ class CharTokenizer:
     output = []
     for raw_id in ids:
       idx = int(raw_id)
-      if idx in (self.pad_id, self.eos_id):
+      if idx in (self.pad_id, self.eos_id, self.unk_id):
         continue
       if 0 <= idx < len(self._id_to_token):
         token = self._id_to_token[idx]
-        if not token.startswith('<'):
+        if not (len(token) > 1 and token.startswith('<')):
           output.append(token)
     return ''.join(output)
 

@@ -119,14 +119,34 @@ def pair_utterances(
       interfering_utterances, key=lambda u: len(u.waveform))
   interfering_lengths = [len(u.waveform) for u in sorted_interfering]
 
+  median_int_len = (
+      interfering_lengths[len(interfering_lengths) // 2]
+      if interfering_lengths else 0)
   pairs = []
   for clean_utt in clean_utterances:
     clean_len = len(clean_utt.waveform)
-    start_idx = int(
-        np.searchsorted(interfering_lengths, clean_len, side='right'))
-    if start_idx >= len(sorted_interfering):
-      continue
-    chosen_idx = rng.randint(start_idx, len(sorted_interfering))
+    if clean_len >= 24000 and median_int_len < 110000:
+      min_int_len = int(clean_len * 1.18)
+      start_idx = int(
+          np.searchsorted(interfering_lengths, min_int_len, side='right'))
+      if start_idx >= len(sorted_interfering):
+        start_idx = int(
+            np.searchsorted(interfering_lengths, clean_len, side='right'))
+      if start_idx >= len(sorted_interfering):
+        continue
+      max_int_len = int(clean_len * 1.32)
+      end_idx = int(
+          np.searchsorted(interfering_lengths, max_int_len, side='right'))
+      end_idx = max(start_idx + 1, min(len(sorted_interfering), end_idx))
+    else:
+      start_idx = int(
+          np.searchsorted(interfering_lengths, clean_len, side='right'))
+      if start_idx >= len(sorted_interfering):
+        continue
+      end_idx = min(
+          len(sorted_interfering),
+          start_idx + max(1, len(sorted_interfering) // 8))
+    chosen_idx = rng.randint(start_idx, end_idx)
     pairs.append((clean_utt, sorted_interfering[chosen_idx]))
   return pairs
 
@@ -136,6 +156,7 @@ def generate_synthetic_rir(
     rt60: float = 0.25,
     duration_sec: float = 0.25,
     direct_delay_ms: float = 5.0,
+    tail_scale: float = 0.025,
     seed: Optional[int] = None,
 ) -> np.ndarray:
   """Generates an exponentially decaying room impulse response (RIR)."""
@@ -151,7 +172,7 @@ def generate_synthetic_rir(
     t = np.arange(num_samples - direct_idx - 1, dtype=np.float64) / sample_rate
     decay_rate = np.log(10.0) * 3.0 / rt60
     envelope = np.exp(-decay_rate * t)
-    rir[direct_idx + 1:] = rng.normal(0.0, 0.3, size=len(t)) * envelope
+    rir[direct_idx + 1:] = rng.normal(0.0, tail_scale, size=len(t)) * envelope
 
   norm = np.linalg.norm(rir)
   if norm > 0:
@@ -183,18 +204,39 @@ def pad_clean_to_match_mixed(
   return np.pad(clean, (0, target_length - len(clean)), mode='constant')
 
 
+def compute_active_speech_power(
+    waveform: np.ndarray,
+    threshold_db: float = -40.0,
+) -> float:
+  """Computes mean power over active samples above `threshold_db` of peak."""
+  wav = np.asarray(waveform, dtype=np.float64).reshape(-1)
+  if len(wav) == 0:
+    return 0.0
+  sq = np.square(wav)
+  peak_sq = float(np.max(sq))
+  if peak_sq <= 1e-12:
+    return 0.0
+  min_active_sq = peak_sq * (10.0 ** (threshold_db / 10.0))
+  active = sq[sq >= min_active_sq]
+  if len(active) == 0:
+    return float(np.mean(sq))
+  return float(np.mean(active))
+
+
 def mix_waveforms_at_snr(
     clean_waveform: np.ndarray,
     interfering_waveform: np.ndarray,
     snr_db: float = 0.0,
+    active_threshold_db: float = -40.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
-  """Mixes clean and interfering waveforms at a specified SNR (in dB)."""
+  """Mixes clean and interfering waveforms at a specified active-speech SNR."""
   clean = np.asarray(clean_waveform, dtype=np.float64).reshape(-1)
   interfering = np.asarray(interfering_waveform, dtype=np.float64).reshape(-1)
 
-  clean_power = np.mean(np.square(clean)) if len(clean) > 0 else 0.0
-  interfering_power = (
-      np.mean(np.square(interfering)) if len(interfering) > 0 else 0.0)
+  clean_power = compute_active_speech_power(
+      clean, threshold_db=active_threshold_db)
+  interfering_power = compute_active_speech_power(
+      interfering, threshold_db=active_threshold_db)
 
   if clean_power > 1e-12 and interfering_power > 1e-12:
     target_interfering_power = clean_power / (10.0 ** (snr_db / 10.0))
@@ -225,25 +267,30 @@ def create_tf_example(
     clean_transcript: str,
     interfering_transcript: str,
     tokenizer: Optional[tec_tokenizer.CharTokenizer] = None,
+    clean_num_samples: Optional[int] = None,
+    interfering_num_samples: Optional[int] = None,
 ) -> tf.train.Example:
   """Builds a `tf.train.Example` proto for `TecInputGenerator`."""
   if tokenizer is None:
     tokenizer = tec_tokenizer.CharTokenizer()
   interfering_ids = tokenizer.text_to_ids(interfering_transcript)
+  clean_arr = np.asarray(clean_waveform, dtype=np.float32).reshape(-1)
+  int_arr = np.asarray(interfering_waveform, dtype=np.float32).reshape(-1)
+  mixed_arr = np.asarray(mixed_waveform, dtype=np.float32).reshape(-1)
+  c_samples = len(clean_arr) if clean_num_samples is None else clean_num_samples
+  i_samples = (
+      len(int_arr)
+      if interfering_num_samples is None else interfering_num_samples)
 
   feature = {
       'utt_id': tf.train.Feature(
           bytes_list=tf.train.BytesList(value=[utt_id.encode('utf-8')])),
       'clean_waveform': tf.train.Feature(
-          float_list=tf.train.FloatList(
-              value=np.asarray(clean_waveform, dtype=np.float32).reshape(-1))),
+          float_list=tf.train.FloatList(value=clean_arr)),
       'interfering_waveform': tf.train.Feature(
-          float_list=tf.train.FloatList(
-              value=np.asarray(
-                  interfering_waveform, dtype=np.float32).reshape(-1))),
+          float_list=tf.train.FloatList(value=int_arr)),
       'mixed_waveform': tf.train.Feature(
-          float_list=tf.train.FloatList(
-              value=np.asarray(mixed_waveform, dtype=np.float32).reshape(-1))),
+          float_list=tf.train.FloatList(value=mixed_arr)),
       'clean_transcript': tf.train.Feature(
           bytes_list=tf.train.BytesList(
               value=[clean_transcript.encode('utf-8')])),
@@ -252,6 +299,10 @@ def create_tf_example(
               value=[interfering_transcript.encode('utf-8')])),
       'interfering_ids': tf.train.Feature(
           int64_list=tf.train.Int64List(value=interfering_ids)),
+      'clean_num_samples': tf.train.Feature(
+          int64_list=tf.train.Int64List(value=[int(c_samples)])),
+      'interfering_num_samples': tf.train.Feature(
+          int64_list=tf.train.Int64List(value=[int(i_samples)])),
   }
   return tf.train.Example(features=tf.train.Features(feature=feature))
 
@@ -263,7 +314,7 @@ def prepare_tfrecord_dataset(
     snr_db: float = 0.0,
     reverb_rt60: float = 0.25,
     seed: int = 0,
-    require_longer_interfering: bool = False,
+    require_longer_interfering: bool = True,
 ) -> int:
   """Pairs, reverberates, mixes, and writes utterances to a TFRecord file."""
   pairs = pair_utterances(
@@ -295,7 +346,9 @@ def prepare_tfrecord_dataset(
           mixed_waveform=mixed_wav,
           clean_transcript=clean_utt.transcript,
           interfering_transcript=int_utt.transcript,
-          tokenizer=tokenizer)
+          tokenizer=tokenizer,
+          clean_num_samples=len(clean_utt.waveform),
+          interfering_num_samples=len(int_utt.waveform))
       writer.write(example.SerializeToString())
       count += 1
   return count

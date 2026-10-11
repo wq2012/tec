@@ -43,17 +43,17 @@ def main():
   parser.add_argument(
       '--num_frames',
       type=int,
-      default=32,
+      default=200,
       help='Number of input spectrogram frames in exported signature.')
   parser.add_argument(
       '--text_length',
       type=int,
-      default=16,
+      default=100,
       help='Number of input text tokens in exported signature.')
   parser.add_argument(
       '--decode_steps',
       type=int,
-      default=8,
+      default=200,
       help='Number of output spectrogram frames to decode.')
   parser.add_argument(
       '--quantize',
@@ -79,10 +79,12 @@ def main():
 
   if args.verify:
     dummy_src = np.zeros((1, args.num_frames, 128), dtype=np.float32)
+    dummy_int = np.zeros((1, args.num_frames, 128), dtype=np.float32)
     dummy_ids = np.ones((1, args.text_length), dtype=np.int32)
     outputs = tflite_export.run_tflite_inference(
         model_bytes,
         source_features=dummy_src,
+        interfering_features=dummy_int,
         interfering_ids=dummy_ids)
     print(
         'Verified TFLite inference output shapes: '

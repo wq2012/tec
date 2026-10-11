@@ -17,7 +17,7 @@ class TecInputGenerator(base_input_generator.BaseInputGenerator):
     p.Define('file_pattern', '',
              'Glob pattern of TFRecord files containing prepared utterances.')
     p.batch_size = 4
-    p.Define('vocab_size', 96, 'Character vocabulary size.')
+    p.Define('vocab_size', 98, 'Character vocabulary size.')
     p.Define('waveform_processor',
              waveform_processor.WaveformProcessor.Params(),
              'WaveformProcessor params for spectrogram extraction.')

@@ -1,5 +1,7 @@
 # Textual Echo Cancellation (TEC)
 
+**This is not an officially supported Google product.**
+
 [![Python application](https://github.com/wq2012/tec/actions/workflows/pythonapp.yml/badge.svg)](https://github.com/wq2012/tec/actions/workflows/pythonapp.yml)
 [![HuggingFace Space](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Space%20Demo-orange)](https://huggingface.co/spaces/wq2012/tec)
 [![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Models-blue)](https://huggingface.co/wq2012/tec_single_interfering)
@@ -220,7 +222,7 @@ at 0 dB SNR with reverberant LJ Speech (single interfering voice) and VCTK
 
 > **⋆ Note (Table 3 & Section 3.4–3.5 of the paper)**:
 > - The side input size and GFLOPS in the two conditions are different since the average lengths of the echo signal are different in the two conditions (~7 seconds per utterance in LJ Speech vs. ~2 seconds per utterance in VCTK).
-> - In the paper, models were trained on 2×2 TPU slices with a global batch size of 32 using the Adam optimizer ($\beta_1=0.9$, $\beta_2=0.999$, $\epsilon=10^{-6}$) and an initial learning rate of $10^{-4}$ exponentially decaying to $10^{-5}$ after 50,000 iterations.
+> - In the paper, models were trained on 2×2 TPU slices with a global batch size of 32 using the Adam optimizer (`beta1=0.9, beta2=0.999, eps=1e-6`) and an initial learning rate of `1e-4` exponentially decaying to `1e-5` after 50,000 iterations.
 
 <p align="center">
   <img src="resources/results.png" alt="Table 3: Published Paper Reference Results" width="720" />
@@ -261,28 +263,52 @@ result = inference.run_inference_on_wav(
 
 Using the standalone data preparation (`scripts/prepare_data.py`), training
 (`scripts/train.py`), and evaluation (`scripts/evaluate.py`) pipelines in this
-repository on the open-source **LibriTTS** (`train-clean-100`, `test-clean`,
-`test-other`), **LJSpeech-1.1** (90%/10% split), and **VCTK-0.92** (90%/10%
-per-speaker split across 109 speakers) datasets at 24 kHz (mixed at 0 dB SNR
-with synthetic room impulse responses at RT60 = 0.25 s,
-trained for 60 steps on CPU with `batch_size=4, learning_rate=1e-3`, and
-evaluated with local `Qwen3-ASR-0.6B-F16` via `audio.cpp` on 20 utterances per
-test split):
+repository on the open-source **LibriTTS** (`train-clean-100`, `dev-clean`,
+`test-clean`, `test-other`), **LJSpeech-1.1** (train/dev/test splits), and
+**VCTK-0.92** (per-speaker train/dev/test splits across 109 speakers) datasets
+at 24 kHz (400 training utterances and 100 validation utterances per condition,
+mixed at 0 dB SNR with synthetic room impulse responses at RT60 = 0.25 s,
+trained for 500 steps with validation-loss early stopping `best.ckpt`,
+`batch_size=8, learning_rate=1e-3`, and evaluated with local
+`Qwen3-ASR-0.6B-F16` via `audio.cpp` across N = 100 utterances per test split
+with 10,000-resample non-parametric bootstrap 95% confidence intervals):
 
-| Condition | Method | Hugging Face Model | WER (%) test-clean ↓ | WER (%) test-other ↓ | MCD (dB) test-clean ↓ | MCD (dB) test-other ↓ | Side Input test-clean (KB) ↓ | Side Input test-other (KB) ↓ |
+| Condition | Method | Hugging Face Model | WER (%) test-clean ↓ | WER (%) test-other ↓ | MCD (dB) test-clean ↓ | MCD (dB) test-other ↓ | Side Input test-clean (KB) ↓ | Avg Complexity (GFLOPS) ↓ |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Ground-truth LibriTTS** | `GroundTruth` | — | 3.52 (7/199) | 6.78 (12/177) | 0.00 | 0.00 | 0.000 | 0.000 |
-| **Single interfering voice** *(LibriTTS + LJSpeech)* | `MicrophoneSignal` | — | 90.45 (180/199) | 114.12 (202/177) | 12.86 | 14.61 | 0.000 | 0.000 |
-| | `NlmsAec` (AEC-NLMS) | — | 88.44 (176/199) | 107.34 (190/177) | 12.80 | 14.48 | 243.465 | 209.085 |
-| | `NoSideInputSingleInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_single_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_single_interfering) | 45.23 (90/199) | 91.53 (162/177) | 9.58 | 11.34 | 0.000 | 0.000 |
-| | `AecSingleInterfering` (AEC-Seq2seq) | [`wq2012/aec_single_interfering`](https://huggingface.co/wq2012/aec_single_interfering) | 12.06 (24/199) | 23.16 (41/177) | 8.85 | 9.86 | 243.465 | 209.085 |
-| | **`TecSingleInterfering` (TEC)** | **[`wq2012/tec_single_interfering`](https://huggingface.co/wq2012/tec_single_interfering)** | **21.61 (43/199)** | **46.89 (83/177)** | **8.24** | **9.28** | **0.076** | **0.068** |
-| **Ground-truth LibriTTS (Multi split)** | `GroundTruth` | — | 5.03 (10/199) | 7.82 (19/243) | 0.00 | 0.00 | 0.000 | 0.000 |
-| **Multiple interfering voices** *(LibriTTS + VCTK)* | `MicrophoneSignal` | — | 34.17 (68/199) | 48.97 (119/243) | 7.67 | 7.70 | 0.000 | 0.000 |
-| | `NlmsAec` (AEC-NLMS) | — | 28.64 (57/199) | 34.98 (85/243) | 7.92 | 8.40 | 186.922 | 206.759 |
-| | `NoSideInputMultiInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_multi_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_multi_interfering) | 31.16 (62/199) | 42.39 (103/243) | 7.93 | 8.72 | 0.000 | 0.000 |
-| | `AecMultiInterfering` (AEC-Seq2seq) | [`wq2012/aec_multi_interfering`](https://huggingface.co/wq2012/aec_multi_interfering) | 8.54 (17/199) | 22.22 (54/243) | 7.80 | 7.88 | 186.922 | 206.759 |
-| | **`TecMultiInterfering` (TEC)** | **[`wq2012/tec_multi_interfering`](https://huggingface.co/wq2012/tec_multi_interfering)** | **26.63 (53/199)** | **45.27 (110/243)** | **7.96** | **8.40** | **0.037** | **0.039** |
+| **Ground-truth LibriTTS** | `GroundTruth` | — | 2.59 (27/1041) [1.54, 3.79] | 6.16 (64/1039) [4.07, 8.47] | 0.00 | 0.00 | 0.000 | 0.00 |
+| **Single interfering voice** *(LibriTTS + LJSpeech)* | `MicrophoneSignal` | — | 80.79 (841/1041) [72.97, 89.04] | 91.15 (947/1039) [84.42, 98.09] | 8.93 [8.62, 9.24] | 9.56 [9.18, 9.93] | 0.000 | 0.00 |
+| | `NlmsAec` (AEC-NLMS) | — | 70.32 (732/1041) [61.76, 79.26] | 87.49 (909/1039) [79.59, 95.49] | 8.76 [8.46, 9.07] | 9.41 [9.04, 9.79] | 189.494 | 0.05 |
+| | `NoSideInputSingleInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_single_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_single_interfering) | 73.10 (761/1041) [65.02, 81.44] | 86.81 (902/1039) [79.79, 93.88] | 8.08 [7.84, 8.33] | 8.81 [8.45, 9.17] | 0.000 | 3.35 |
+| | `AecSingleInterfering` (AEC-Seq2seq) | [`wq2012/aec_single_interfering`](https://huggingface.co/wq2012/aec_single_interfering) | 8.17 (85/1041) [6.06, 10.42] | 19.35 (201/1039) [15.23, 23.96] | 5.83 [5.59, 6.07] | 6.20 [5.89, 6.53] | 189.494 | 5.11 |
+| | **`TecSingleInterfering` (TEC)** | **[`wq2012/tec_single_interfering`](https://huggingface.co/wq2012/tec_single_interfering)** | **64.07 (667/1041) [56.32, 72.33]** | **85.37 (887/1039) [78.48, 92.38]** | **7.99 [7.75, 8.24]** | **8.60 [8.26, 8.96]** | **0.059** | **3.71** |
+| **Ground-truth LibriTTS (Multi split)** | `GroundTruth` | — | 2.59 (27/1041) [1.54, 3.79] | 6.35 (66/1039) [4.22, 8.67] | 0.00 | 0.00 | 0.000 | 0.00 |
+| **Multiple interfering voices** *(LibriTTS + VCTK)* | `MicrophoneSignal` | — | 83.67 (871/1041) [75.45, 91.89] | 91.72 (953/1039) [85.43, 98.27] | 8.07 [7.86, 8.29] | 8.35 [8.06, 8.65] | 0.000 | 0.00 |
+| | `NlmsAec` (AEC-NLMS) | — | 75.02 (781/1041) [66.40, 83.62] | 86.72 (901/1039) [79.65, 94.04] | 7.85 [7.65, 8.06] | 8.17 [7.88, 8.47] | 195.914 | 0.05 |
+| | `NoSideInputMultiInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_multi_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_multi_interfering) | 77.33 (805/1041) [67.79, 86.82] | 84.79 (881/1039) [77.53, 91.94] | 7.58 [7.36, 7.80] | 7.97 [7.65, 8.30] | 0.000 | 3.46 |
+| | `AecMultiInterfering` (AEC-Seq2seq) | [`wq2012/aec_multi_interfering`](https://huggingface.co/wq2012/aec_multi_interfering) | 9.32 (97/1041) [6.42, 12.54] | 21.56 (224/1039) [16.63, 26.85] | 5.08 [4.92, 5.25] | 5.32 [5.07, 5.57] | 195.914 | 5.29 |
+| | **`TecMultiInterfering` (TEC)** | **[`wq2012/tec_multi_interfering`](https://huggingface.co/wq2012/tec_multi_interfering)** | **65.90 (686/1041) [57.38, 74.18]** | **78.25 (813/1039) [71.17, 85.23]** | **7.19 [7.02, 7.36]** | **7.53 [7.26, 7.82]** | **0.062** | **3.84** |
+
+#### Text-Content Sensitivity Ablation (N = 100 per split)
+
+To verify that `TtsEncoderV2` actively exploits the semantic and phonetic content of the interfering TTS transcript rather than acting as a content-independent bias, we evaluate `TecSingleInterfering` and `TecMultiInterfering` under three text side-input conditions on the exact same audio mixtures:
+
+| Split | Side-Input Condition | WER (%) ↓ | MCD (dB) ↓ | ΔWER vs. `matched` | Paired p-value (Bootstrap / Wilcoxon) |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| `single_test_clean` (`TecSingleInterfering`) | **`matched` (true TTS transcript)** | **64.07% (667/1041)** | **7.99 dB** | — | — |
+| | `shuffled` (mismatched transcript) | 71.66% (746/1041) | 8.06 dB | +7.59% | p < 0.0001 / p = 0.00099 |
+| | `empty` (no text / `Vanilla-Seq2seq`) | 73.10% (761/1041) | 8.08 dB | +9.03% | p < 0.0001 / p = 0.00014 |
+| `multi_test_clean` (`TecMultiInterfering`) | **`matched` (true TTS transcript)** | **65.90% (686/1041)** | **7.19 dB** | — | — |
+| | `shuffled` (mismatched transcript) | 75.31% (784/1041) | 7.46 dB | +9.41% | p < 0.0001 / p = 0.00017 |
+| | `empty` (no text / `Vanilla-Seq2seq`) | 77.33% (805/1041) | 7.58 dB | +11.43% | p < 0.0001 / p = 0.00012 |
+
+#### Input SNR Ablation on `single_test_clean` (N = 100 mixtures per SNR)
+
+| Input SNR | `MicrophoneSignal` WER / MCD | `NlmsAec` WER / MCD | `Vanilla-Seq2seq` WER / MCD | **`TecSingleInterfering` WER / MCD** | `AecSingleInterfering` WER / MCD |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| **+5 dB** | 34.01% / 7.89 dB | 25.55% / 7.68 dB | 24.88% / 7.01 dB | **21.81% / 6.92 dB** | 6.05% / 5.33 dB |
+| **0 dB** | 80.79% / 8.93 dB | 70.32% / 8.76 dB | 73.10% / 8.08 dB | **64.07% / 7.99 dB** | 8.17% / 5.83 dB |
+| **-5 dB** | 104.80% / 9.91 dB | 103.55% / 9.78 dB | 103.55% / 9.27 dB | **102.50% / 9.20 dB** | 33.14% / 6.92 dB |
+| **-10 dB** | 107.88% / 10.75 dB | 107.78% / 10.65 dB | 106.82% / 10.19 dB | **106.05% / 10.11 dB** | 88.86% / 8.14 dB |
 
 ---
 

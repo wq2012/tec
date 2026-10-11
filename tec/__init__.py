@@ -17,11 +17,18 @@ except ModuleNotFoundError:
   except ImportError:
     pass
 
+try:
+  from absl import flags as _absl_flags
+  if not _absl_flags.FLAGS.is_parsed():
+    _absl_flags.FLAGS.mark_as_parsed()
+except ImportError:
+  pass
+
 from . import data_prep  # noqa: E402
 from . import evaluation  # noqa: E402
 from . import tokenizer  # noqa: E402
 
-__version__ = '0.1.2'
+__version__ = '0.2.0'
 
 UtteranceRecord = data_prep.UtteranceRecord
 resample_waveform = data_prep.resample_waveform
@@ -39,7 +46,10 @@ compute_mcd = evaluation.compute_mcd
 normalize_transcript = evaluation.normalize_transcript
 compute_wer = evaluation.compute_wer
 estimate_flops_and_side_input = evaluation.estimate_flops_and_side_input
+compute_bootstrap_ci = evaluation.compute_bootstrap_ci
+compute_paired_significance = evaluation.compute_paired_significance
 
+VOCAB_SIZE = tokenizer.VOCAB_SIZE
 CharTokenizer = tokenizer.CharTokenizer
 
 try:
@@ -76,6 +86,7 @@ try:
   TtsEncoderV2 = encoder_text.TtsEncoderV2
 
   TecInferenceRunner = inference.TecInferenceRunner
+  TecInferenceEngine = inference.TecInferenceEngine
   TecInputGenerator = input_generator.TecInputGenerator
 
   PostEditConvNet = layers.PostEditConvNet
