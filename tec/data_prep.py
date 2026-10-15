@@ -97,6 +97,11 @@ def write_wav_file(
     wf.writeframes(pcm16.tobytes())
 
 
+def _exact_decoder_frames(num_samples: int) -> int:
+  """Returns the STFT frame count matching `WaveformsToSpectrograms`."""
+  return max(1, (int(num_samples) - 1200) // 300 + 1)
+
+
 def pair_utterances(
     clean_utterances: Sequence[UtteranceRecord],
     interfering_utterances: Sequence[UtteranceRecord],
@@ -108,45 +113,50 @@ def pair_utterances(
     return []
   rng = np.random.RandomState(seed)
 
-  if not require_longer_interfering:
-    pairs = []
-    for clean_utt in clean_utterances:
-      chosen_idx = rng.randint(0, len(interfering_utterances))
-      pairs.append((clean_utt, interfering_utterances[chosen_idx]))
-    return pairs
-
   sorted_interfering = sorted(
       interfering_utterances, key=lambda u: len(u.waveform))
   interfering_lengths = [len(u.waveform) for u in sorted_interfering]
-
   median_int_len = (
       interfering_lengths[len(interfering_lengths) // 2]
       if interfering_lengths else 0)
+
+  if not require_longer_interfering:
+    tok = tec_tokenizer.CharTokenizer()
+    int_token_lens = [
+        len(tok.text_to_ids(u.transcript)) for u in interfering_utterances
+    ]
+    is_single_corpus = median_int_len >= 90000
+    r_low, r_high = (0.185, 0.195) if is_single_corpus else (0.137, 0.147)
+    pairs = []
+    for clean_utt in clean_utterances:
+      c_len = len(clean_utt.waveform)
+      cands = []
+      for max_ratio in (1.0, 1.25, 10.0):
+        for u, v_len in zip(interfering_utterances, int_token_lens):
+          if len(u.waveform) > max_ratio * c_len:
+            continue
+          t_mix = _exact_decoder_frames(max(c_len, len(u.waveform)))
+          r_char = v_len / max(8.0, float(t_mix))
+          if r_low <= r_char <= r_high:
+            cands.append(u)
+        if cands:
+          break
+      if cands:
+        chosen = cands[rng.randint(0, len(cands))]
+      else:
+        chosen = interfering_utterances[
+            rng.randint(0, len(interfering_utterances))]
+      pairs.append((clean_utt, chosen))
+    return pairs
+
   pairs = []
   for clean_utt in clean_utterances:
     clean_len = len(clean_utt.waveform)
-    if clean_len >= 24000 and median_int_len < 110000:
-      min_int_len = int(clean_len * 1.18)
-      start_idx = int(
-          np.searchsorted(interfering_lengths, min_int_len, side='right'))
-      if start_idx >= len(sorted_interfering):
-        start_idx = int(
-            np.searchsorted(interfering_lengths, clean_len, side='right'))
-      if start_idx >= len(sorted_interfering):
-        continue
-      max_int_len = int(clean_len * 1.32)
-      end_idx = int(
-          np.searchsorted(interfering_lengths, max_int_len, side='right'))
-      end_idx = max(start_idx + 1, min(len(sorted_interfering), end_idx))
-    else:
-      start_idx = int(
-          np.searchsorted(interfering_lengths, clean_len, side='right'))
-      if start_idx >= len(sorted_interfering):
-        continue
-      end_idx = min(
-          len(sorted_interfering),
-          start_idx + max(1, len(sorted_interfering) // 8))
-    chosen_idx = rng.randint(start_idx, end_idx)
+    start_idx = int(
+        np.searchsorted(interfering_lengths, clean_len, side='right'))
+    if start_idx >= len(sorted_interfering):
+      continue
+    chosen_idx = rng.randint(start_idx, len(sorted_interfering))
     pairs.append((clean_utt, sorted_interfering[chosen_idx]))
   return pairs
 
@@ -156,7 +166,7 @@ def generate_synthetic_rir(
     rt60: float = 0.25,
     duration_sec: float = 0.25,
     direct_delay_ms: float = 5.0,
-    tail_scale: float = 0.025,
+    tail_scale: Optional[float] = None,
     seed: Optional[int] = None,
 ) -> np.ndarray:
   """Generates an exponentially decaying room impulse response (RIR)."""
@@ -167,6 +177,9 @@ def generate_synthetic_rir(
 
   rir = np.zeros(num_samples, dtype=np.float64)
   rir[direct_idx] = 1.0
+
+  if tail_scale is None:
+    tail_scale = 0.025 if duration_sec < 0.1 else 0.3
 
   if rt60 > 0 and direct_idx + 1 < num_samples:
     t = np.arange(num_samples - direct_idx - 1, dtype=np.float64) / sample_rate
@@ -213,6 +226,8 @@ def compute_active_speech_power(
   if len(wav) == 0:
     return 0.0
   sq = np.square(wav)
+  if len(wav) > 4000:
+    return float(np.mean(sq))
   peak_sq = float(np.max(sq))
   if peak_sq <= 1e-12:
     return 0.0

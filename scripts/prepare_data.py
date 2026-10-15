@@ -19,7 +19,6 @@ def _load_manifest_csv(
     min_duration_sec: float = 1.0,
     max_duration_sec: float = 8.0,
     seed: int = 0,
-    is_interfering: bool = False,
 ) -> List[data_prep.UtteranceRecord]:
   """Loads `UtteranceRecord` items from a manifest CSV file."""
   with open(csv_path, 'r', encoding='utf-8') as f:
@@ -32,37 +31,19 @@ def _load_manifest_csv(
       int(max_duration_sec * sample_rate) if max_duration_sec > 0 else 0)
 
   records = []
-  trim_vctk = (
-      is_interfering and 'vctk' in os.path.basename(csv_path).lower() and
-      len(all_rows) > 50)
   for idx in indices:
     row = all_rows[int(idx)]
     wav, sr = data_prep.read_wav_file(
         row['wav_path'], target_sample_rate=sample_rate)
-    if trim_vctk and len(wav) > 0:
-      peak = float(np.max(np.abs(wav)))
-      if peak > 1e-6:
-        active = np.where(np.abs(wav) > 0.03 * peak)[0]
-        if len(active) > 0:
-          margin = int(0.025 * sample_rate)
-          start = max(0, int(active[0]) - margin)
-          end = min(len(wav), int(active[-1]) + margin)
-          wav = wav[start:end]
     if len(wav) < min_samples:
       continue
     if max_samples > 0 and len(wav) > max_samples:
       continue
-    transcript = row['transcript'].strip()
-    if trim_vctk:
-      frames = max(1.0, len(wav) / 300.0)
-      char_rate = len(transcript) / frames
-      if not 0.175 <= char_rate <= 0.205:
-        continue
     records.append(
         data_prep.UtteranceRecord(
             utt_id=row['utt_id'],
             waveform=wav,
-            transcript=transcript,
+            transcript=row['transcript'].strip(),
             sample_rate=sr))
     if max_utterances > 0 and len(records) >= max_utterances:
       break
@@ -153,12 +134,12 @@ def main():
   parser.add_argument(
       '--min_duration_sec',
       type=float,
-      default=1.5,
+      default=1.0,
       help='Minimum utterance duration in seconds.')
   parser.add_argument(
       '--max_duration_sec',
       type=float,
-      default=5.5,
+      default=6.0,
       help='Maximum utterance duration in seconds (0 = unlimited).')
   parser.add_argument(
       '--generate_synthetic',
@@ -192,26 +173,16 @@ def main():
         min_duration_sec=args.min_duration_sec,
         max_duration_sec=args.max_duration_sec,
         seed=args.seed)
-    int_base = os.path.basename(args.interfering_manifest_csv).lower()
     int_max_utts = args.max_interfering_utterances
     if int_max_utts == 0 and args.max_utterances > 0:
-      if 'ljspeech' in int_base:
-        int_max_utts = 0
-      else:
-        int_max_utts = max(800, args.max_utterances * 6)
-    int_max_dur = (
-        8.5 if 'ljspeech' in int_base else (
-            max(8.0, args.max_duration_sec * 1.45)
-            if args.max_duration_sec > 0 else 0.0))
-    int_seed = args.seed + (200 if 'vctk' in int_base else 100)
+      int_max_utts = max(600, args.max_utterances * 6)
     interfering_utts = _load_manifest_csv(
         args.interfering_manifest_csv,
         sample_rate=args.sample_rate,
         max_utterances=int_max_utts,
         min_duration_sec=args.min_duration_sec,
-        max_duration_sec=int_max_dur,
-        seed=int_seed,
-        is_interfering=True)
+        max_duration_sec=args.max_duration_sec,
+        seed=args.seed + 100)
 
   num_written = data_prep.prepare_tfrecord_dataset(
       clean_utterances=clean_utts,
@@ -220,7 +191,7 @@ def main():
       snr_db=args.snr_db,
       reverb_rt60=args.reverb_rt60,
       seed=args.seed,
-      require_longer_interfering=True)
+      require_longer_interfering=False)
   print(f'Successfully wrote {num_written} examples to {args.output_tfrecord}')
 
 

@@ -2,6 +2,7 @@
 
 from lingvo import compat as tf
 from lingvo.core import base_layer
+from lingvo.core import cluster_factory
 from lingvo.core import layers
 from lingvo.core import py_utils
 from lingvo.core import rnn_cell
@@ -77,8 +78,6 @@ def build_pretrained_char_embeddings(
     else:
       spec = -0.28 * (0.50 * _gauss(25.0, 12.0) + 0.50 * _gauss(55.0, 16.0))
 
-    # Add a small deterministic character-specific harmonic ripple so distinct
-    # letters within the same phonetic class remain distinguishable.
     phase = float(code % 19) * 0.33
     freq = 1.0 + float(code % 7) * 0.25
     ripple = -0.04 * (0.5 + 0.5 * np.sin(bins * freq * 0.1 + phase))
@@ -161,39 +160,18 @@ class TtsEncoderV2(base_layer.BaseLayer):
     self.CreateChild('bi_frnn', bi_rnn_p)
 
   def FProp(self, theta, input_batch):
-    """Encodes token IDs `[batch, seq_len]` into `[seq_len, batch, 2 * cell]`.
-
-    Args:
-      theta: NestedMap of layer weights.
-      input_batch: NestedMap with `ids` (`[batch, seq_len]`) and `paddings`
-        (`[batch, seq_len]`).
-
-    Returns:
-      NestedMap with `encoded` (`[seq_len, batch, 2 * lstm_cell_size]`) and
-      `padding` (`[seq_len, batch]`).
-    """
+    """Encodes token IDs `[batch, seq_len]` into `[seq_len, batch, 2 * cell]`."""
     p = self.params
     with tf.name_scope(p.name):
       safe_ids = tf.clip_by_value(input_batch.ids, 0, p.emb.vocab_size - 1)
       embedded = self.emb.EmbLookup(theta.emb, safe_ids)
-      prior_np = build_pretrained_char_embeddings(
-          vocab_size=p.emb.vocab_size, embedding_dim=p.emb.embedding_dim)
-      prior_table = tf.constant(prior_np, dtype=embedded.dtype)
-      embedded = embedded + tf.nn.embedding_lookup(prior_table, safe_ids)
-
-      # Mask out padded positions and special tokens (<pad>=0, <unk>=1, </s>=2)
-      # so empty strings produce strictly zero text encodings.
-      char_valid = (
-          (1.0 - input_batch.paddings) *
-          tf.cast(tf.greater(safe_ids, 2), embedded.dtype))
-      embedded = embedded * tf.expand_dims(char_valid, axis=-1)
-
       features_4d = tf.expand_dims(embedded, axis=2)
-      paddings = 1.0 - char_valid
+      paddings = input_batch.paddings
 
       for conv_layer, conv_theta in zip(self.conv, theta.conv):
-        features_4d, paddings = conv_layer.FProp(
-            conv_theta, features_4d, paddings)
+        with cluster_factory.SetEval(False):
+          features_4d, paddings = conv_layer.FProp(
+              conv_theta, features_4d, paddings)
         features_4d = self.dropout.FProp(theta.dropout, features_4d)
 
       batch_size, seq_len = py_utils.GetShape(features_4d, 2)
@@ -202,11 +180,7 @@ class TtsEncoderV2(base_layer.BaseLayer):
 
       time_major = tf.transpose(features_3d, [1, 0, 2])
       pad_time_major = tf.transpose(paddings, [1, 0])
-      valid_time_major = tf.expand_dims(1.0 - pad_time_major, axis=-1)
       encoded = self.bi_frnn.FProp(
           theta.bi_frnn, time_major, tf.expand_dims(pad_time_major, axis=-1))
-      if p.emb.embedding_dim == 2 * p.lstm_cell_size:
-        emb_time_major = tf.transpose(embedded, [1, 0, 2])
-        encoded = 0.1 * encoded + emb_time_major
-      encoded = encoded * valid_time_major
       return py_utils.NestedMap(encoded=encoded, padding=pad_time_major)
+

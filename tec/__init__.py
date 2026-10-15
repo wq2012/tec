@@ -28,7 +28,7 @@ from . import data_prep  # noqa: E402
 from . import evaluation  # noqa: E402
 from . import tokenizer  # noqa: E402
 
-__version__ = '0.2.1'
+__version__ = '0.2.2'
 
 UtteranceRecord = data_prep.UtteranceRecord
 resample_waveform = data_prep.resample_waveform

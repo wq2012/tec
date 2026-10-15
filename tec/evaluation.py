@@ -245,19 +245,32 @@ def compute_paired_significance(
 
   if np.allclose(per_unit_diff, 0.0):
     p_wilcoxon = 1.0
+    t_stat = 0.0
+    p_ttest = 1.0
   else:
     try:
       _, p_wilcoxon = stats.wilcoxon(per_unit_diff, zero_method='wilcox')
       p_wilcoxon = float(p_wilcoxon)
     except ValueError:
       p_wilcoxon = p_bootstrap
+    try:
+      t_res = stats.ttest_rel(a, b) if weights is None else stats.ttest_1samp(
+          per_unit_diff, 0.0)
+      t_stat = float(t_res.statistic)
+      p_ttest = float(t_res.pvalue)
+    except ValueError:
+      t_stat = 0.0
+      p_ttest = p_bootstrap
 
   return {
       'mean_diff': mean_diff,
       'ci_lower': float(np.percentile(diff_samples, 2.5)),
       'ci_upper': float(np.percentile(diff_samples, 97.5)),
+      't_stat': t_stat,
+      'p_ttest': p_ttest,
       'p_bootstrap': p_bootstrap,
       'p_wilcoxon': p_wilcoxon,
+      'p_value_ttest': p_ttest,
       'p_value_bootstrap': p_bootstrap,
       'p_value_wilcoxon': p_wilcoxon,
   }

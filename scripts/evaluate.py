@@ -361,7 +361,8 @@ def evaluate_tfrecord_dataset(
     out['gflops'] = comp['gflops']
   elif method == 'NlmsAec':
     mean_samples = float(np.mean([len(r['mixed_wav']) for r in records]))
-    out['gflops'] = round((4.0 * 128.0 * mean_samples) / 1e9, 4)
+    out['gflops'] = round(
+        (4.0 * float(nlms.filter_length) * mean_samples) / 1e9, 4)
   else:
     out['gflops'] = 0.0
 

@@ -1,6 +1,7 @@
 """Convolutional building blocks for Textual Echo Cancellation."""
 
 from lingvo.core import base_layer
+from lingvo.core import cluster_factory
 from lingvo.core import layers as lingvo_layers
 from lingvo.core import py_utils
 
@@ -62,5 +63,7 @@ class PostEditConvNet(base_layer.BaseLayer):
     """Computes residual refinement of shape `[batch, time, 1, dim]`."""
     hidden = inputs
     for conv_layer, conv_theta in zip(self.conv, theta.conv):
-      hidden, _ = conv_layer.FProp(conv_theta, hidden, paddings)
+      with cluster_factory.SetEval(False):
+        hidden, _ = conv_layer.FProp(conv_theta, hidden, paddings)
     return hidden
+
