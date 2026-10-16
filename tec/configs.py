@@ -173,12 +173,11 @@ class TecSingleInterfering(TecBaseConfig):
 
   def Task(self):
     p = super().Task()
-    p.decoder.reverb_sub_scale = 0.22
+    p.decoder.reverb_sub_scale = 0.45
     p.decoder.frame_delta_scale = 0.85
     p.decoder.frame_delta_offset = 0.21
     p.decoder.bin_delta_scale = 0.68
-    p.decoder.char_rate_min = 0.183
-    p.decoder.char_rate_max = 0.197
+    p.decoder.tail_suppression_scale = 1.0
     return p
 
 
@@ -188,12 +187,11 @@ class TecMultiInterfering(TecBaseConfig):
 
   def Task(self):
     p = super().Task()
-    p.decoder.reverb_sub_scale = 0.35
-    p.decoder.frame_delta_scale = 1.25
-    p.decoder.frame_delta_offset = -0.10
-    p.decoder.bin_delta_scale = 1.20
-    p.decoder.char_rate_min = 0.135
-    p.decoder.char_rate_max = 0.149
+    p.decoder.reverb_sub_scale = 0.42
+    p.decoder.frame_delta_scale = 0.85
+    p.decoder.frame_delta_offset = 0.21
+    p.decoder.bin_delta_scale = 0.68
+    p.decoder.tail_suppression_scale = 1.0
     return p
 
 
@@ -212,10 +210,11 @@ class NoSideInputSingleInterfering(TecBaseConfig):
     dec_p.reduction_factor = p.decoder.reduction_factor
     dec_p.target_eos_offset_frames = p.decoder.target_eos_offset_frames
     dec_p.decode_max_output_frames = p.decoder.decode_max_output_frames
-    dec_p.reverb_sub_scale = 0.68
-    dec_p.frame_delta_scale = 0.60
-    dec_p.frame_delta_offset = -0.28
-    dec_p.bin_delta_scale = 0.60
+    dec_p.reverb_sub_scale = 0.28
+    dec_p.frame_delta_scale = 0.78
+    dec_p.frame_delta_offset = 0.12
+    dec_p.bin_delta_scale = 0.65
+    dec_p.tail_suppression_scale = 0.65
     dec_p.step.rnn_layers = p.decoder.step.rnn_layers
     dec_p.step.rnn_cell_dim = p.decoder.step.rnn_cell_dim
     dec_p.step.attention = p.decoder.step.attention.Copy()
@@ -229,10 +228,11 @@ class NoSideInputMultiInterfering(NoSideInputSingleInterfering):
 
   def Task(self):
     p = super().Task()
-    p.decoder.reverb_sub_scale = 0.85
-    p.decoder.frame_delta_scale = 0.45
-    p.decoder.frame_delta_offset = -0.52
-    p.decoder.bin_delta_scale = 0.45
+    p.decoder.reverb_sub_scale = 0.58
+    p.decoder.frame_delta_scale = 0.62
+    p.decoder.frame_delta_offset = -0.18
+    p.decoder.bin_delta_scale = 0.58
+    p.decoder.tail_suppression_scale = 0.0
     return p
 
 
@@ -250,11 +250,11 @@ class AecSingleInterfering(TecBaseConfig):
     p.encoder_interfering = base_p.encoder_speech.Copy().Set(
         name='interfering_speech_encoder')
     p.decoder = base_p.decoder
-    p.decoder.reverb_sub_scale = 0.65
-    p.decoder.frame_delta_scale = 1.30
-    p.decoder.frame_delta_offset = 0.25
-    p.decoder.bin_delta_scale = 1.25
-    p.decoder.char_rate_min = 0.0
+    p.decoder.reverb_sub_scale = 0.85
+    p.decoder.frame_delta_scale = 1.00
+    p.decoder.frame_delta_offset = 0.22
+    p.decoder.bin_delta_scale = 0.85
+    p.decoder.tail_suppression_scale = 1.0
     p.train = base_p.train
     return p
 
@@ -265,9 +265,9 @@ class AecMultiInterfering(AecSingleInterfering):
 
   def Task(self):
     p = super().Task()
-    p.decoder.reverb_sub_scale = 0.60
-    p.decoder.frame_delta_scale = 1.20
-    p.decoder.frame_delta_offset = 0.20
-    p.decoder.bin_delta_scale = 1.10
-    p.decoder.char_rate_min = 0.0
+    p.decoder.reverb_sub_scale = 0.85
+    p.decoder.frame_delta_scale = 1.00
+    p.decoder.frame_delta_offset = 0.22
+    p.decoder.bin_delta_scale = 0.85
+    p.decoder.tail_suppression_scale = 1.0
     return p

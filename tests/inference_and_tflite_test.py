@@ -69,11 +69,16 @@ class InferenceAndTfliteTest(test_utils.TestCase):
           mixed_waveforms=[wav], interfering_texts=['good morning'])
       out2 = runner.predict(
           mixed_waveforms=[wav], interfering_texts=['good morning'])
+      out_rev = runner.predict(
+          mixed_waveforms=[wav], interfering_texts=['gninrom doog'])
       self.assertEqual((1, 4, 128), out1['feature_preds'].shape)
       self.assertEqual(1, out1['predicted_waveforms'].shape[0])
       # Verify eval mode makes repeated inference calls 100% deterministic.
       np.testing.assert_allclose(
           out1['feature_preds'], out2['feature_preds'], atol=0.0, rtol=0.0)
+      # Verify same-length different-content text alters predictions.
+      diff = np.abs(out1['feature_preds'] - out_rev['feature_preds'])
+      self.assertGreater(float(np.max(diff)), 1e-4)
     finally:
       runner.close()
 
@@ -131,7 +136,8 @@ class InferenceAndTfliteTest(test_utils.TestCase):
           decode_steps=3)
       self.assertGreater(len(aec_bytes), 0)
       int_feat_a = np.zeros((1, 8, 128), dtype=np.float32)
-      int_feat_b = np.ones((1, 8, 128), dtype=np.float32) * 2.0
+      int_feat_b = np.linspace(
+          0.0, 2.0, 8 * 128, dtype=np.float32).reshape((1, 8, 128))
       aec_out_a = tflite_export.run_tflite_inference(
           aec_tflite_path,
           source_features=src_feat,

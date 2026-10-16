@@ -284,18 +284,18 @@ with 10,000-resample non-parametric bootstrap 95% confidence intervals):
 
 | Condition | Method | Hugging Face Model | WER (%) test-clean ↓ | WER (%) test-other ↓ | MCD (dB) test-clean ↓ | MCD (dB) test-other ↓ | Side Input test-clean (KB) ↓ | Avg Complexity (GFLOPS) ↓ |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Ground-truth LibriTTS** | `GroundTruth` | — | 3.52 (34/965) [2.09, 5.12] | 5.19 (52/1001) [3.56, 7.06] | 0.00 | 0.00 | 0.000 | 0.00 |
-| **Single interfering voice** *(LibriTTS + LJSpeech)* | `MicrophoneSignal` | — | 30.67 (296/965) [22.83, 39.70] | 56.94 (570/1001) [48.04, 66.46] | 7.19 [6.81, 7.60] | 8.35 [7.89, 8.80] | 0.000 | 0.00 |
-| | `NlmsAec` (AEC-NLMS) | — | 58.86 (568/965) [51.17, 67.37] | 79.92 (800/1001) [73.98, 86.40] | 7.84 [7.54, 8.16] | 9.12 [8.70, 9.54] | 146.667 | 0.02 |
-| | `NoSideInputSingleInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_single_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_single_interfering) | 30.88 (298/965) [24.11, 38.88] | 58.54 (586/1001) [49.60, 67.69] | 8.34 [8.10, 8.58] | 9.27 [8.96, 9.58] | 0.000 | 2.79 |
-| | `AecSingleInterfering` (AEC-Seq2seq) | [`wq2012/aec_single_interfering`](https://huggingface.co/wq2012/aec_single_interfering) | 9.12 (88/965) [6.59, 11.92] | 21.68 (217/1001) [17.73, 26.00] | 6.62 [6.44, 6.80] | 7.20 [6.96, 7.45] | 146.667 | 4.15 |
-| | **`TecSingleInterfering` (TEC)** | **[`wq2012/tec_single_interfering`](https://huggingface.co/wq2012/tec_single_interfering)** | **20.31 (196/965) [15.19, 26.71]** | **38.06 (381/1001) [31.47, 45.35]** | **7.00 [6.72, 7.29]** | **7.76 [7.40, 8.15]** | **0.048** | **3.08** |
-| **Ground-truth LibriTTS (Multi split)** | `GroundTruth` | — | 3.97 (37/931) [2.58, 5.48] | 6.56 (65/991) [4.69, 8.65] | 0.00 | 0.00 | 0.000 | 0.00 |
-| **Multiple interfering voices** *(LibriTTS + VCTK)* | `MicrophoneSignal` | — | 20.30 (189/931) [14.89, 26.57] | 40.16 (398/991) [33.27, 47.98] | 5.48 [5.14, 5.85] | 5.88 [5.51, 6.27] | 0.000 | 0.00 |
-| | `NlmsAec` (AEC-NLMS) | — | 34.48 (321/931) [29.08, 40.35] | 55.70 (552/991) [49.49, 62.39] | 6.89 [6.61, 7.18] | 7.68 [7.29, 8.08] | 136.043 | 0.02 |
-| | `NoSideInputMultiInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_multi_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_multi_interfering) | 30.83 (287/931) [24.72, 37.89] | 50.76 (503/991) [43.86, 58.31] | 8.57 [8.34, 8.81] | 8.76 [8.51, 9.01] | 0.000 | 2.76 |
-| | `AecMultiInterfering` (AEC-Seq2seq) | [`wq2012/aec_multi_interfering`](https://huggingface.co/wq2012/aec_multi_interfering) | 9.77 (91/931) [7.40, 12.39] | 24.52 (243/991) [20.60, 28.74] | 5.93 [5.74, 6.15] | 6.16 [5.92, 6.41] | 136.043 | 4.03 |
-| | **`TecMultiInterfering` (TEC)** | **[`wq2012/tec_multi_interfering`](https://huggingface.co/wq2012/tec_multi_interfering)** | **20.09 (187/931) [16.11, 24.53]** | **39.25 (389/991) [33.79, 45.29]** | **6.52 [6.34, 6.70]** | **6.84 [6.60, 7.09]** | **0.035** | **2.98** |
+| **Ground-truth LibriTTS** | `GroundTruth` | — | 3.86 (41/1062) [2.43, 5.49] | 6.62 (67/1012) [4.66, 8.78] | 0.00 | 0.00 | 0.000 | 0.00 |
+| **Single interfering voice** *(LibriTTS + LJSpeech)* | `MicrophoneSignal` | — | 80.32 (853/1062) [68.49, 93.55] | 102.77 (1040/1012) [88.25, 119.32] | 9.92 [9.56, 10.27] | 10.74 [10.32, 11.16] | 0.000 | 0.00 |
+| | `NlmsAec` (AEC-NLMS) | — | 58.38 (620/1062) [47.37, 71.05] | 85.77 (868/1012) [71.61, 102.19] | 9.51 [9.16, 9.86] | 10.33 [9.92, 10.75] | 235.403 | 0.24 |
+| | `NoSideInputSingleInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_single_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_single_interfering) | 39.08 (415/1062) [30.26, 48.91] | 54.35 (550/1012) [44.66, 64.93] | 7.07 [6.86, 7.29] | 7.38 [7.13, 7.64] | 0.000 | 4.17 |
+| | `AecSingleInterfering` (AEC-Seq2seq) | [`wq2012/aec_single_interfering`](https://huggingface.co/wq2012/aec_single_interfering) | 7.91 (84/1062) [5.68, 10.48] | 17.29 (175/1012) [13.34, 21.76] | 4.97 [4.60, 5.35] | 4.96 [4.61, 5.31] | 235.403 | 6.36 |
+| | **`TecSingleInterfering` (TEC)** | **[`wq2012/tec_single_interfering`](https://huggingface.co/wq2012/tec_single_interfering)** | **29.76 (316/1062) [23.09, 36.97]** | **50.59 (512/1012) [41.96, 59.66]** | **5.52 [5.16, 5.89]** | **5.55 [5.18, 5.93]** | **0.074** | **4.62** |
+| **Ground-truth LibriTTS (Multi split)** | `GroundTruth` | — | 3.06 (30/979) [1.90, 4.35] | 6.85 (65/949) [4.77, 9.16] | 0.00 | 0.00 | 0.000 | 0.00 |
+| **Multiple interfering voices** *(LibriTTS + VCTK)* | `MicrophoneSignal` | — | 50.77 (497/979) [40.86, 62.15] | 67.33 (639/949) [56.40, 79.77] | 7.50 [7.13, 7.87] | 7.82 [7.41, 8.24] | 0.000 | 0.00 |
+| | `NlmsAec` (AEC-NLMS) | — | 34.22 (335/979) [25.72, 44.51] | 48.58 (461/949) [39.15, 59.91] | 7.01 [6.67, 7.37] | 7.43 [7.04, 7.83] | 203.138 | 0.21 |
+| | `NoSideInputMultiInterfering` (Vanilla-Seq2seq) | [`wq2012/vanilla_seq2seq_multi_interfering`](https://huggingface.co/wq2012/vanilla_seq2seq_multi_interfering) | 63.33 (620/979) [55.27, 71.69] | 69.86 (663/949) [61.89, 78.18] | 8.26 [7.76, 8.76] | 9.32 [8.77, 9.89] | 0.000 | 3.59 |
+| | `AecMultiInterfering` (AEC-Seq2seq) | [`wq2012/aec_multi_interfering`](https://huggingface.co/wq2012/aec_multi_interfering) | 6.84 (67/979) [4.98, 8.85] | 14.86 (141/949) [11.25, 18.79] | 4.65 [4.28, 5.02] | 4.67 [4.28, 5.06] | 203.138 | 5.48 |
+| | **`TecMultiInterfering` (TEC)** | **[`wq2012/tec_multi_interfering`](https://huggingface.co/wq2012/tec_multi_interfering)** | **24.31 (238/979) [18.94, 30.47]** | **36.25 (344/949) [30.34, 42.52]** | **4.74 [4.42, 5.07]** | **4.91 [4.54, 5.30]** | **0.050** | **3.90** |
 
 #### Text-Content Sensitivity Ablation (N = 100 per split)
 
@@ -303,23 +303,23 @@ To verify that `TtsEncoderV2` actively exploits the semantic and phonetic conten
 
 | Split | Side-Input Condition | WER (%) ↓ | MCD (dB) ↓ | ΔWER vs. `matched` | Paired p-value (Bootstrap / Wilcoxon) |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| `single_test_clean` (`TecSingleInterfering`) | **`matched` (true TTS transcript)** | **20.31% (196/965)** | **7.00 dB** | — | — |
-| | `shuffled` (mismatched transcript) | 30.67% (296/965) | 8.34 dB | +10.36% | p < 0.0001 / p = 1.94e-05 |
-| | `empty` (no text) | 31.09% (300/965) | 8.61 dB | +10.78% | p < 0.0001 / p = 1.75e-05 |
-| | `Vanilla-Seq2seq` (`NoSideInputSingleInterfering`) | 30.88% (298/965) | 8.34 dB | +10.57% | p < 0.0001 / p = 1.28e-04 |
-| `multi_test_clean` (`TecMultiInterfering`) | **`matched` (true TTS transcript)** | **20.09% (187/931)** | **6.52 dB** | — | — |
-| | `shuffled` (mismatched transcript) | 28.79% (268/931) | 8.53 dB | +8.70% | p = 0.0002 / p = 8.30e-04 |
-| | `empty` (no text) | 29.97% (279/931) | 8.59 dB | +9.88% | p < 0.0001 / p = 6.32e-05 |
-| | `Vanilla-Seq2seq` (`NoSideInputMultiInterfering`) | 30.83% (287/931) | 8.57 dB | +10.74% | p < 0.0001 / p = 3.10e-05 |
+| `single_test_clean` (`TecSingleInterfering`) | **`matched` (true TTS transcript)** | **29.76% (316/1062)** | **5.52 dB** | — | — |
+| | `shuffled` (mismatched transcript) | 70.90% (753/1062) | 9.26 dB | +41.15% | p < 0.0001 / p = 2.61e-12 |
+| | `empty` (no text) | 71.94% (764/1062) | 9.32 dB | +42.18% | p < 0.0001 / p = 4.89e-13 |
+| | `Vanilla-Seq2seq` (`NoSideInputSingleInterfering`) | 39.08% (415/1062) | 7.07 dB | +9.32% | p < 0.0001 / p = 6.69e-04 |
+| `multi_test_clean` (`TecMultiInterfering`) | **`matched` (true TTS transcript)** | **24.31% (238/979)** | **4.74 dB** | — | — |
+| | `shuffled` (mismatched transcript) | 48.52% (475/979) | 7.92 dB | +24.21% | p < 0.0001 / p = 9.10e-09 |
+| | `empty` (no text) | 47.29% (463/979) | 7.83 dB | +22.98% | p < 0.0001 / p = 1.41e-07 |
+| | `Vanilla-Seq2seq` (`NoSideInputMultiInterfering`) | 63.33% (620/979) | 8.26 dB | +39.02% | p < 0.0001 / p = 1.99e-11 |
 
 #### Input SNR Ablation on `single_test_clean` (N = 100 mixtures per SNR)
 
 | Input SNR | `MicrophoneSignal` WER / MCD | `NlmsAec` WER / MCD | `Vanilla-Seq2seq` WER / MCD | **`TecSingleInterfering` WER / MCD** | `AecSingleInterfering` WER / MCD |
 | :---: | :---: | :---: | :---: | :---: | :---: |
-| **+5 dB** | 12.23% / 6.09 dB | 44.04% / 7.29 dB | 14.92% / 7.45 dB | **10.16% / 6.14 dB** | 6.63% / 6.15 dB |
-| **0 dB** | 30.67% / 7.19 dB | 58.86% / 7.84 dB | 30.88% / 8.34 dB | **20.31% / 7.00 dB** | 9.12% / 6.62 dB |
-| **-5 dB** | 79.07% / 8.26 dB | 79.07% / 8.46 dB | 78.24% / 9.31 dB | **52.23% / 7.87 dB** | 18.86% / 7.34 dB |
-| **-10 dB** | 103.21% / 9.20 dB | 94.40% / 9.07 dB | 103.63% / 10.16 dB | **93.89% / 8.63 dB** | 53.06% / 8.11 dB |
+| **+5 dB** | 51.88% / 9.03 dB | 40.58% / 8.72 dB | 9.23% / 6.28 dB | **8.47% / 4.69 dB** | 5.65% / 4.33 dB |
+| **0 dB** | 80.32% / 9.92 dB | 58.38% / 9.51 dB | 39.08% / 7.07 dB | **29.76% / 5.52 dB** | 7.91% / 4.97 dB |
+| **-5 dB** | 119.02% / 10.73 dB | 90.30% / 10.28 dB | 96.80% / 7.82 dB | **87.76% / 6.34 dB** | 17.23% / 5.73 dB |
+| **-10 dB** | 124.86% / 11.40 dB | 121.28% / 10.95 dB | 103.86% / 8.35 dB | **101.04% / 6.91 dB** | 49.25% / 6.33 dB |
 
 ---
 

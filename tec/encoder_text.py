@@ -2,7 +2,6 @@
 
 from lingvo import compat as tf
 from lingvo.core import base_layer
-from lingvo.core import cluster_factory
 from lingvo.core import layers
 from lingvo.core import py_utils
 from lingvo.core import rnn_cell
@@ -160,27 +159,34 @@ class TtsEncoderV2(base_layer.BaseLayer):
     self.CreateChild('bi_frnn', bi_rnn_p)
 
   def FProp(self, theta, input_batch):
-    """Encodes token IDs `[batch, seq_len]` into `[seq_len, batch, 2 * cell]`."""
+    """Encodes token IDs `[batch, seq_len]` into `[seq_len, batch, 2*cell]`."""
     p = self.params
     with tf.name_scope(p.name):
       safe_ids = tf.clip_by_value(input_batch.ids, 0, p.emb.vocab_size - 1)
-      embedded = self.emb.EmbLookup(theta.emb, safe_ids)
+      char_mask = tf.expand_dims(
+          tf.cast(safe_ids >= 3, py_utils.FPropDtype(p)), axis=-1)
+      embedded = self.emb.EmbLookup(theta.emb, safe_ids) * char_mask
       features_4d = tf.expand_dims(embedded, axis=2)
       paddings = input_batch.paddings
 
       for conv_layer, conv_theta in zip(self.conv, theta.conv):
-        with cluster_factory.SetEval(False):
-          features_4d, paddings = conv_layer.FProp(
-              conv_theta, features_4d, paddings)
+        features_4d, paddings = conv_layer.FProp(
+            conv_theta, features_4d, paddings)
         features_4d = self.dropout.FProp(theta.dropout, features_4d)
 
       batch_size, seq_len = py_utils.GetShape(features_4d, 2)
       channels = p.filter_shapes[-1][-1]
-      features_3d = tf.reshape(features_4d, [batch_size, seq_len, channels])
+      features_3d = (
+          tf.reshape(features_4d, [batch_size, seq_len, channels]) * char_mask)
 
       time_major = tf.transpose(features_3d, [1, 0, 2])
       pad_time_major = tf.transpose(paddings, [1, 0])
-      encoded = self.bi_frnn.FProp(
+      rnn_out = self.bi_frnn.FProp(
           theta.bi_frnn, time_major, tf.expand_dims(pad_time_major, axis=-1))
+      emb_time_major = tf.transpose(embedded, [1, 0, 2])
+      valid_tm = tf.expand_dims(1.0 - pad_time_major, axis=-1)
+      if p.emb.embedding_dim == 2 * p.lstm_cell_size:
+        encoded = (rnn_out + emb_time_major) * valid_tm
+      else:
+        encoded = rnn_out * valid_tm
       return py_utils.NestedMap(encoded=encoded, padding=pad_time_major)
-

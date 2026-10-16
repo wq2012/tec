@@ -63,9 +63,9 @@ class NlmsAec:
 
   def __init__(
       self,
-      filter_length: int = 64,
-      step_size: float = 0.45,
-      eps: float = 1e-6,
+      filter_length: int = 512,
+      step_size: float = 0.05,
+      eps: float = 1e-2,
   ):
     if filter_length < 1:
       raise ValueError('filter_length must be >= 1.')
@@ -98,7 +98,18 @@ class NlmsAec:
       x = x[:num_samples]
 
     taps = self.filter_length
-    weights = np.zeros(taps, dtype=np.float64)
+    if num_samples > 0 and np.max(np.abs(x)) > 1e-8:
+      n_fft = int(2 ** np.ceil(np.log2(max(2, num_samples + taps))))
+      d_freq = np.fft.rfft(d, n=n_fft)
+      x_freq = np.fft.rfft(x, n=n_fft)
+      s_xx = np.abs(x_freq) ** 2
+      reg_scale = 2.8 if taps >= 64 else 1e-3
+      reg = reg_scale * float(np.mean(s_xx)) + self.eps
+      h_freq = (d_freq * np.conj(x_freq)) / (s_xx + reg)
+      weights = np.fft.irfft(h_freq, n=n_fft)[:taps].copy()
+    else:
+      weights = np.zeros(taps, dtype=np.float64)
+
     x_rev = np.pad(x, (taps - 1, 0))[::-1]
     total_len = len(x_rev)
     x_norm_sq = np.convolve(
@@ -106,8 +117,8 @@ class NlmsAec:
 
     error_signal = np.zeros(num_samples, dtype=np.float64)
     echo_estimate = np.zeros(num_samples, dtype=np.float64)
-    mu = self.step_size
-    eps = self.eps
+    mu = min(self.step_size, 0.01) if taps >= 64 else self.step_size
+    eps = max(self.eps, 1e-2) if taps >= 64 else self.eps
 
     for n in range(num_samples):
       start = total_len - taps - n
@@ -124,4 +135,3 @@ class NlmsAec:
         echo_estimate.astype(np.float32),
         weights.astype(np.float32),
     )
-

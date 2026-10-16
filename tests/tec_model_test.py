@@ -144,6 +144,10 @@ class TecAndAecModelTest(test_utils.TestCase):
       task_p = cfg_cls().Task()
       self.assertEqual(1, task_p.encoder_speech.num_conv_lstm_layers)
       self.assertEqual(98, cfg_cls.VOCAB_SIZE)
+    with self.session(graph=tf.Graph(), use_gpu=False):
+      enc = configs.TecSingleInterfering().Task().encoder_speech.Instantiate()
+      self.assertEqual(1, len(enc.conv_lstm_rnn))
+      self.assertEqual(1, len(enc.conv_lstm_cnn))
 
 
 if __name__ == '__main__':

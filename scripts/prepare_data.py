@@ -166,10 +166,11 @@ def main():
       raise ValueError(
           'Either --generate_synthetic or both --clean_manifest_csv and '
           '--interfering_manifest_csv must be provided.')
+    clean_limit = args.max_utterances + 50 if args.max_utterances > 0 else 0
     clean_utts = _load_manifest_csv(
         args.clean_manifest_csv,
         sample_rate=args.sample_rate,
-        max_utterances=args.max_utterances,
+        max_utterances=clean_limit,
         min_duration_sec=args.min_duration_sec,
         max_duration_sec=args.max_duration_sec,
         seed=args.seed)
@@ -183,6 +184,11 @@ def main():
         min_duration_sec=args.min_duration_sec,
         max_duration_sec=args.max_duration_sec,
         seed=args.seed + 100)
+    if args.max_utterances > 0 and interfering_utts:
+      max_int_len = max(len(u.waveform) for u in interfering_utts)
+      clean_utts = [
+          u for u in clean_utts if len(u.waveform) < max_int_len
+      ][:args.max_utterances]
 
   num_written = data_prep.prepare_tfrecord_dataset(
       clean_utterances=clean_utts,
@@ -191,7 +197,7 @@ def main():
       snr_db=args.snr_db,
       reverb_rt60=args.reverb_rt60,
       seed=args.seed,
-      require_longer_interfering=False)
+      require_longer_interfering=True)
   print(f'Successfully wrote {num_written} examples to {args.output_tfrecord}')
 
 

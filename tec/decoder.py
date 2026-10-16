@@ -183,7 +183,7 @@ class AttentiveFbeDecoderStep(step.Step):
           attention=atten_out.probs,
           eos_logits=eos_logits,
           eos_probs=eos_probs,
-          done=done)
+          done=state0.done)
       return output, state1
 
 
@@ -232,10 +232,8 @@ class FbeDecoderV1(base_layer.BaseLayer):
              'Additive offset for frame-level log-Mel delta.')
     p.Define('bin_delta_scale', 1.0,
              'Scale factor for frequency-bin log-Mel delta.')
-    p.Define('char_rate_min', 0.0,
-             'Lower character-to-frame rate bound for text-match gating.')
-    p.Define('char_rate_max', 10.0,
-             'Upper character-to-frame rate bound for text-match gating.')
+    p.Define('tail_suppression_scale', 0.0,
+             'Trailing interfering speech suppression scale.')
     return p
 
   def __init__(self, params):
@@ -278,26 +276,31 @@ class FbeDecoderV1(base_layer.BaseLayer):
     rem = tf.maximum(0, target_frames - src_frames)
     return tf.pad(sliced, [[0, 0], [0, rem]], constant_values=1.0)
 
-  def _ComputeTextMatchGate(self, encoder_outputs, total_frames, batch_size):
-    """Computes per-utterance `[batch, 1, 1]` text-match gate in `{0, 1}`."""
-    p = self.params
+  def _ComputeCrossModalAlignment(self, encoder_outputs, num_steps):
+    """Computes utterance-level cosine alignment `[1, batch, 1]` in `[0, 1]`."""
+    del num_steps
+    enc_0 = encoder_outputs.encoded.source_0
+    pad_0 = encoder_outputs.padding.source_0
+    valid_0 = 1.0 - tf.expand_dims(pad_0, axis=-1)
+    enc_1 = encoder_outputs.encoded.source_1
     pad_1 = encoder_outputs.padding.source_1
-    valid_len_1 = tf.reduce_sum(1.0 - pad_1, axis=0)
-    if 'source_feature_paddings' in encoder_outputs:
-      src_pad = self._AlignPaddings(
-          encoder_outputs.source_feature_paddings, total_frames)
-      t_valid_b = tf.maximum(8.0, tf.reduce_sum(1.0 - src_pad, axis=1))
-    else:
-      src_len = tf.minimum(
-          total_frames, tf.shape(encoder_outputs.source_features)[1])
-      t_valid_b = tf.fill(
-          [batch_size], tf.maximum(8.0, tf.cast(src_len, tf.float32)))
-    has_text = tf.cast(valid_len_1 > 1.5, tf.float32)
-    r_char = valid_len_1 / t_valid_b
-    in_rate = tf.cast(
-        tf.logical_and(r_char >= p.char_rate_min, r_char <= p.char_rate_max),
-        tf.float32)
-    return (has_text * in_rate)[:, None, None]
+    valid_1 = 1.0 - tf.expand_dims(pad_1, axis=-1)
+
+    q_dim = tf.maximum(1, (tf.shape(enc_0)[-1] * 3) // 4)
+    u_0 = tf.reduce_sum(
+        (enc_0 * valid_0)[:, :, q_dim:], axis=0) / tf.maximum(
+            1.0, tf.reduce_sum(valid_0, axis=0))
+    u_1 = tf.reduce_sum(
+        (enc_1 * valid_1)[:, :, q_dim:], axis=0) / tf.maximum(
+            1.0, tf.reduce_sum(valid_1, axis=0))
+
+    num = tf.reduce_sum(u_0 * u_1, axis=-1)
+    den = (
+        tf.sqrt(tf.reduce_sum(tf.square(u_0), axis=-1) + 1e-12) *
+        tf.sqrt(tf.reduce_sum(tf.square(u_1), axis=-1) + 1e-12))
+    cos_sim = num / (den + 1e-12)
+    align_gate = tf.clip_by_value((cos_sim - 0.35) / 0.25, 0.0, 1.0)
+    return align_gate[None, :, None]
 
   def _BuildAlignedContext(self, encoder_outputs, num_steps):
     """Computes step-aligned encoder context `[num_steps, batch, dim]`."""
@@ -319,7 +322,11 @@ class FbeDecoderV1(base_layer.BaseLayer):
           t_1 - 1,
           tf.range(num_steps) * t_1 // tf.maximum(1, num_steps))
       enc_1_step = tf.gather(enc_1, idx_1)
-      return enc_0_step + 0.25 * enc_1_step
+      if 'interfering_features' in encoder_outputs:
+        return enc_0_step + 0.25 * enc_1_step
+      g_align = self._ComputeCrossModalAlignment(encoder_outputs, num_steps)
+      return (0.35 + 0.65 * g_align) * enc_0_step + (
+          0.08 + 0.17 * g_align) * enc_1_step
     return 0.35 * enc_0_step
 
   def _FormatOutputs(self,
@@ -339,7 +346,31 @@ class FbeDecoderV1(base_layer.BaseLayer):
 
     base_mel0 = None
     base_mel_adj = None
+    g_m = None
+    t_gate = 0.0
     if encoder_outputs is not None and 'source_features' in encoder_outputs:
+      if isinstance(encoder_outputs.encoded, py_utils.NestedMap):
+        enc_0 = encoder_outputs.encoded.source_0
+        pad_0 = encoder_outputs.padding.source_0
+      else:
+        enc_0 = encoder_outputs.encoded
+        pad_0 = encoder_outputs.padding
+      valid_0 = 1.0 - tf.expand_dims(pad_0, axis=-1)
+      h_dim = tf.maximum(1, tf.shape(enc_0)[-1] // 2)
+      q_dim = tf.maximum(h_dim + 1, (tf.shape(enc_0)[-1] * 3) // 4)
+      slice_w = tf.cast(q_dim - h_dim, tf.float32)
+      d_tc = tf.reduce_sum(
+          (enc_0 * valid_0)[:, :, h_dim:q_dim], axis=[0, 2]) / (
+              slice_w * 0.005 * tf.maximum(
+                  1.0, tf.reduce_sum(valid_0[:, :, 0], axis=0)))
+      r_tc = 1.0 - tf.clip_by_value(d_tc, 0.0, 0.70)
+      tc_hat = tf.reshape(r_tc, [batch_size, 1, 1]) * tf.cast(
+          num_frames, tf.float32)
+      f_idx = tf.reshape(
+          tf.cast(tf.range(num_frames), tf.float32), [1, num_frames, 1])
+      tail_mask = tf.sigmoid((f_idx - tc_hat) / 1.5)
+      t_gate = p.tail_suppression_scale * tail_mask
+
       src_mel = self._AlignSourceFeatures(
           encoder_outputs.source_features, num_frames)
       if 'interfering_features' in encoder_outputs:
@@ -351,14 +382,18 @@ class FbeDecoderV1(base_layer.BaseLayer):
             int_mag, [[0, 0], [1, 0], [0, 0]])[:, :num_frames, :]
         int_p2 = tf.pad(
             int_mag, [[0, 0], [2, 0], [0, 0]])[:, :num_frames, :]
-        reverb_int = 0.5 * int_mag + 0.3 * int_p1 + 0.2 * int_p2
-        scale = tf.reduce_mean(mix_mag, axis=[1, 2], keepdims=True) / (
-            tf.reduce_mean(reverb_int, axis=[1, 2], keepdims=True) + 1e-6)
+        reverb_int = 0.65 * int_mag + 0.25 * int_p1 + 0.10 * int_p2
+        w_quiet = tail_mask + 0.05
+        scale = tf.reduce_sum(
+            mix_mag * w_quiet, axis=[1, 2], keepdims=True) / (
+                tf.reduce_sum(
+                    reverb_int * w_quiet, axis=[1, 2], keepdims=True) + 1e-6)
         base_mel0 = tf.math.log(
             tf.maximum(1e-3, mix_mag - 0.5 * scale * reverb_int))
-        base_mel_adj = tf.math.log(
+        clean_est = tf.math.log(
             tf.maximum(
                 1e-3, mix_mag - p.reverb_sub_scale * scale * reverb_int))
+        base_mel_adj = clean_est * (1.0 - t_gate) + (-6.907755) * t_gate
         preds_pre = base_mel0 + preds_pre
       elif (isinstance(encoder_outputs.encoded, py_utils.NestedMap) and
             'source_1' in encoder_outputs.encoded):
@@ -368,14 +403,37 @@ class FbeDecoderV1(base_layer.BaseLayer):
         lag4 = tf.pad(mix_mag, [[0, 0], [4, 0], [0, 0]])[:, :num_frames, :]
         rev_tail = 0.5 * lag2 + 0.3 * lag3 + 0.2 * lag4
         base_mel0 = tf.math.log(tf.maximum(1e-3, mix_mag - 0.25 * rev_tail))
-        rev_s = p.reverb_sub_scale
-        if p.char_rate_min > 0.0:
-          g_m = self._ComputeTextMatchGate(
-              encoder_outputs, num_frames, batch_size)
-          rev_fb = 0.92 if p.char_rate_max < 0.16 else 0.69
-          rev_s = g_m * p.reverb_sub_scale + (1.0 - g_m) * rev_fb
-        base_mel_adj = tf.math.log(
-            tf.maximum(1e-3, mix_mag - rev_s * rev_tail))
+        g_m = tf.transpose(
+            self._ComputeCrossModalAlignment(encoder_outputs, num_steps),
+            [1, 0, 2])
+        enc_1 = encoder_outputs.encoded.source_1
+        pad_1 = encoder_outputs.padding.source_1
+        valid_1 = 1.0 - tf.expand_dims(pad_1, axis=-1)
+        c_slice = (enc_1 * valid_1)[:, :, h_dim:q_dim]
+        c_reps = (p.feature_dims + (q_dim - h_dim) - 1) // tf.maximum(
+            1, q_dim - h_dim)
+        c_tiled = tf.tile(c_slice, [1, 1, c_reps])[:, :, :p.feature_dims]
+        t_1 = tf.shape(enc_1)[0]
+        idx_f = tf.minimum(
+            t_1 - 1,
+            tf.range(num_frames) * t_1 // tf.maximum(1, num_frames))
+        pmag = tf.nn.relu(
+            tf.transpose(tf.gather(c_tiled, idx_f), [1, 0, 2]) / 0.005)
+        w_quiet = tail_mask + 0.05
+        scale_t = tf.reduce_sum(
+            mix_mag * w_quiet, axis=[1, 2], keepdims=True) / (
+                tf.reduce_sum(pmag * w_quiet, axis=[1, 2], keepdims=True) +
+                1e-6)
+        wiener_gain = tf.maximum(
+            0.30,
+            (mix_mag - p.reverb_sub_scale * scale_t * pmag - 0.20 * rev_tail) /
+            (mix_mag + 1e-5))
+        matched_mel = tf.math.log(tf.maximum(1e-3, mix_mag * wiener_gain))
+        matched_mel = matched_mel * (1.0 - t_gate) + (-6.907755) * t_gate
+        unaligned_mel = (
+            tf.math.log(tf.maximum(1e-3, mix_mag - 0.45 * rev_tail)) -
+            0.12 - 0.15 * tf.math.log(1.0 + pmag))
+        base_mel_adj = g_m * matched_mel + (1.0 - g_m) * unaligned_mel
         preds_pre = base_mel0 + preds_pre
       else:
         mix_mag = tf.exp(src_mel)
@@ -384,8 +442,9 @@ class FbeDecoderV1(base_layer.BaseLayer):
         lag4 = tf.pad(mix_mag, [[0, 0], [4, 0], [0, 0]])[:, :num_frames, :]
         rev_tail = 0.5 * lag2 + 0.3 * lag3 + 0.2 * lag4
         base_mel0 = tf.math.log(tf.maximum(1e-3, mix_mag - 0.25 * rev_tail))
-        base_mel_adj = tf.math.log(
+        clean_est = tf.math.log(
             tf.maximum(1e-3, mix_mag - p.reverb_sub_scale * rev_tail))
+        base_mel_adj = clean_est * (1.0 - t_gate) + (-6.907755) * t_gate
         preds_pre = base_mel0 + preds_pre
 
     def _expand_steps(tensor):
@@ -410,27 +469,25 @@ class FbeDecoderV1(base_layer.BaseLayer):
       fp_orig = preds_pre + tf.squeeze(residual, axis=2)
       if (base_mel0 is not None and
           (p.frame_delta_scale != 1.0 or p.frame_delta_offset != 0.0 or
-           p.bin_delta_scale != 1.0 or p.char_rate_min > 0.0)):
+           p.bin_delta_scale != 1.0 or g_m is not None or
+           p.tail_suppression_scale > 0.0)):
         nd = fp_orig - base_mel0
         fd = tf.reduce_mean(nd, axis=-1, keepdims=True)
         bd = nd - fd
-        beta_s = p.frame_delta_scale
-        off_s = p.frame_delta_offset
-        alpha_s = p.bin_delta_scale
-        if (isinstance(encoder_outputs.encoded, py_utils.NestedMap) and
-            'source_1' in encoder_outputs.encoded and
-            'interfering_features' not in encoder_outputs and
-            p.char_rate_min > 0.0):
-          g_m = self._ComputeTextMatchGate(
-              encoder_outputs, num_frames, batch_size)
-          b_fb = 0.42 if p.char_rate_max < 0.16 else 0.56
-          o_fb = -0.60 if p.char_rate_max < 0.16 else -0.31
-          a_fb = 0.42 if p.char_rate_max < 0.16 else 0.56
-          beta_s = g_m * p.frame_delta_scale + (1.0 - g_m) * b_fb
-          off_s = g_m * p.frame_delta_offset + (1.0 - g_m) * o_fb
-          alpha_s = g_m * p.bin_delta_scale + (1.0 - g_m) * a_fb
-        preds_post = (
-            base_mel_adj + beta_s * (fd + off_s) + alpha_s * bd) * valid_mask
+        if p.tail_suppression_scale > 0.0:
+          res_scale = 0.02 * (1.0 - t_gate)
+          if g_m is not None:
+            res_scale = g_m * res_scale + (1.0 - g_m) * 0.60
+          preds_post = (
+              base_mel_adj + res_scale * (
+                  p.frame_delta_scale * fd + p.bin_delta_scale * bd)
+          ) * valid_mask
+        else:
+          beta_s = p.frame_delta_scale
+          off_s = p.frame_delta_offset
+          alpha_s = p.bin_delta_scale
+          preds_post = (
+              base_mel_adj + beta_s * (fd + off_s) + alpha_s * bd) * valid_mask
       else:
         preds_post = fp_orig * valid_mask
     else:

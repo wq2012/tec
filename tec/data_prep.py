@@ -97,11 +97,6 @@ def write_wav_file(
     wf.writeframes(pcm16.tobytes())
 
 
-def _exact_decoder_frames(num_samples: int) -> int:
-  """Returns the STFT frame count matching `WaveformsToSpectrograms`."""
-  return max(1, (int(num_samples) - 1200) // 300 + 1)
-
-
 def pair_utterances(
     clean_utterances: Sequence[UtteranceRecord],
     interfering_utterances: Sequence[UtteranceRecord],
@@ -113,41 +108,17 @@ def pair_utterances(
     return []
   rng = np.random.RandomState(seed)
 
+  if not require_longer_interfering:
+    pairs = []
+    for clean_utt in clean_utterances:
+      chosen = interfering_utterances[
+          rng.randint(0, len(interfering_utterances))]
+      pairs.append((clean_utt, chosen))
+    return pairs
+
   sorted_interfering = sorted(
       interfering_utterances, key=lambda u: len(u.waveform))
   interfering_lengths = [len(u.waveform) for u in sorted_interfering]
-  median_int_len = (
-      interfering_lengths[len(interfering_lengths) // 2]
-      if interfering_lengths else 0)
-
-  if not require_longer_interfering:
-    tok = tec_tokenizer.CharTokenizer()
-    int_token_lens = [
-        len(tok.text_to_ids(u.transcript)) for u in interfering_utterances
-    ]
-    is_single_corpus = median_int_len >= 90000
-    r_low, r_high = (0.185, 0.195) if is_single_corpus else (0.137, 0.147)
-    pairs = []
-    for clean_utt in clean_utterances:
-      c_len = len(clean_utt.waveform)
-      cands = []
-      for max_ratio in (1.0, 1.25, 10.0):
-        for u, v_len in zip(interfering_utterances, int_token_lens):
-          if len(u.waveform) > max_ratio * c_len:
-            continue
-          t_mix = _exact_decoder_frames(max(c_len, len(u.waveform)))
-          r_char = v_len / max(8.0, float(t_mix))
-          if r_low <= r_char <= r_high:
-            cands.append(u)
-        if cands:
-          break
-      if cands:
-        chosen = cands[rng.randint(0, len(cands))]
-      else:
-        chosen = interfering_utterances[
-            rng.randint(0, len(interfering_utterances))]
-      pairs.append((clean_utt, chosen))
-    return pairs
 
   pairs = []
   for clean_utt in clean_utterances:
@@ -166,7 +137,7 @@ def generate_synthetic_rir(
     rt60: float = 0.25,
     duration_sec: float = 0.25,
     direct_delay_ms: float = 5.0,
-    tail_scale: Optional[float] = None,
+    tail_scale: float = 0.025,
     seed: Optional[int] = None,
 ) -> np.ndarray:
   """Generates an exponentially decaying room impulse response (RIR)."""
@@ -177,9 +148,6 @@ def generate_synthetic_rir(
 
   rir = np.zeros(num_samples, dtype=np.float64)
   rir[direct_idx] = 1.0
-
-  if tail_scale is None:
-    tail_scale = 0.025 if duration_sec < 0.1 else 0.3
 
   if rt60 > 0 and direct_idx + 1 < num_samples:
     t = np.arange(num_samples - direct_idx - 1, dtype=np.float64) / sample_rate
@@ -226,8 +194,6 @@ def compute_active_speech_power(
   if len(wav) == 0:
     return 0.0
   sq = np.square(wav)
-  if len(wav) > 4000:
-    return float(np.mean(sq))
   peak_sq = float(np.max(sq))
   if peak_sq <= 1e-12:
     return 0.0
@@ -328,6 +294,7 @@ def prepare_tfrecord_dataset(
     output_tfrecord_path: str,
     snr_db: float = 0.0,
     reverb_rt60: float = 0.25,
+    reverb_tail_scale: float = 0.3,
     seed: int = 0,
     require_longer_interfering: bool = True,
 ) -> int:
@@ -347,6 +314,7 @@ def prepare_tfrecord_dataset(
       rir = generate_synthetic_rir(
           sample_rate=clean_utt.sample_rate,
           rt60=reverb_rt60,
+          tail_scale=reverb_tail_scale,
           seed=seed + idx + 1)
       reverb_int_wav = apply_reverberation(int_utt.waveform, rir)
       mixed_wav, padded_clean_wav = mix_waveforms_at_snr(
@@ -389,6 +357,8 @@ def build_ljspeech_manifests(
     test_csv_path: str,
     train_ratio: float = 0.9,
     seed: int = 42,
+    dev_csv_path: Optional[str] = None,
+    dev_ratio: float = 0.05,
 ) -> Tuple[int, int]:
   """Builds 90%/10% train/test CSV manifests for LJSpeech (Paper Sec 3.1)."""
   meta_path = os.path.join(ljspeech_root, 'metadata.csv')
@@ -416,6 +386,12 @@ def build_ljspeech_manifests(
   split_idx = int(round(len(rows) * train_ratio))
   train_rows = [rows[i] for i in sorted(indices[:split_idx])]
   test_rows = [rows[i] for i in sorted(indices[split_idx:])]
+  if dev_csv_path and len(train_rows) > 1:
+    dev_count = max(1, int(round(len(train_rows) * dev_ratio)))
+    _write_manifest_rows(dev_csv_path, train_rows[-dev_count:])
+    train_rows = train_rows[:-dev_count]
+  elif dev_csv_path:
+    _write_manifest_rows(dev_csv_path, train_rows)
   return (
       _write_manifest_rows(train_csv_path, train_rows),
       _write_manifest_rows(test_csv_path, test_rows),
@@ -428,11 +404,14 @@ def build_vctk_manifests(
     test_csv_path: str,
     train_ratio: float = 0.9,
     seed: int = 42,
+    dev_csv_path: Optional[str] = None,
+    dev_ratio: float = 0.05,
 ) -> Tuple[int, int]:
   """Builds 90%/10% per-speaker train/test CSV manifests for VCTK."""
   rng = np.random.RandomState(seed)
   train_rows = []
   test_rows = []
+  dev_rows = []
 
   speaker_dirs = sorted(
       d for d in os.listdir(vctk_root)
@@ -457,11 +436,19 @@ def build_vctk_manifests(
       continue
     indices = rng.permutation(len(spk_rows))
     split_idx = int(round(len(spk_rows) * train_ratio))
-    for i in sorted(indices[:split_idx]):
-      train_rows.append(spk_rows[i])
+    spk_train = [spk_rows[i] for i in sorted(indices[:split_idx])]
+    if dev_csv_path and len(spk_train) > 1:
+      dev_count = max(1, int(round(len(spk_train) * dev_ratio)))
+      dev_rows.extend(spk_train[-dev_count:])
+      spk_train = spk_train[:-dev_count]
+    elif dev_csv_path and spk_train:
+      dev_rows.extend(spk_train)
+    train_rows.extend(spk_train)
     for i in sorted(indices[split_idx:]):
       test_rows.append(spk_rows[i])
 
+  if dev_csv_path:
+    _write_manifest_rows(dev_csv_path, dev_rows)
   return (
       _write_manifest_rows(train_csv_path, train_rows),
       _write_manifest_rows(test_csv_path, test_rows),
@@ -471,11 +458,13 @@ def build_vctk_manifests(
 def build_libritts_manifest(
     split_dirs: Sequence[str],
     output_csv_path: str,
+    dev_csv_path: Optional[str] = None,
+    dev_ratio: float = 0.05,
 ) -> int:
   """Builds a CSV manifest from one or more LibriTTS split directories."""
   rows = []
   for split_dir in split_dirs:
-    for root, _, files in os.walk(split_dir):
+    for root, _, files in sorted(os.walk(split_dir)):
       file_set = set(files)
       for fname in sorted(files):
         if not fname.endswith('.wav'):
@@ -491,4 +480,10 @@ def build_libritts_manifest(
           transcript = tf_in.read().strip()
         if transcript:
           rows.append((utt_id, os.path.join(root, fname), transcript))
+  if dev_csv_path and len(rows) > 1:
+    dev_count = max(1, int(round(len(rows) * dev_ratio)))
+    _write_manifest_rows(dev_csv_path, rows[-dev_count:])
+    rows = rows[:-dev_count]
+  elif dev_csv_path:
+    _write_manifest_rows(dev_csv_path, rows)
   return _write_manifest_rows(output_csv_path, rows)
